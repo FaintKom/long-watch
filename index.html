@@ -229,6 +229,54 @@
     .mc-btn.attack { bottom: 260px; }
     .mc-btn.interact { bottom: 200px; }
     .mc-btn.jump { right: 100px; bottom: 200px; }
+
+    #inv-panel {
+      position: absolute; right: 16px; bottom: 16px;
+      width: 240px;
+      background: rgba(10,8,5,0.92);
+      border: 1px solid #553; border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px; line-height: 1.55;
+      color: #ddd;
+      pointer-events: none;
+    }
+    #inv-panel h4 { color: #fc4; font-size: 13px; margin-bottom: 4px; letter-spacing: 0.5px; }
+    #inv-panel .inv-line { display: flex; justify-content: space-between; }
+    #inv-panel .gold-line { color: #fc4; font-weight: bold; border-bottom: 1px solid #443; padding-bottom: 4px; margin-bottom: 4px; }
+
+    #shop-panel {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 480px; max-height: 70vh;
+      background: rgba(20,15,8,0.97);
+      border: 2px solid #fc4; border-radius: 6px;
+      padding: 18px;
+      color: #ddd; font-size: 14px; line-height: 1.5;
+      display: none; flex-direction: column;
+      pointer-events: auto; z-index: 80;
+    }
+    #shop-panel.active { display: flex; }
+    #shop-panel h3 { color: #fc4; font-size: 16px; margin-bottom: 10px; }
+    #shop-panel .shop-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 8px; margin: 2px 0;
+      background: rgba(30,20,8,0.85);
+      border: 1px solid #443; border-radius: 4px;
+    }
+    #shop-panel .shop-row:hover { border-color: #fc4; }
+    #shop-panel .shop-buy {
+      padding: 4px 10px; background: #2a2a2a; color: #fc4;
+      border: 1px solid #fc4; border-radius: 3px;
+      font-family: inherit; font-size: 12px; cursor: pointer;
+    }
+    #shop-panel .shop-buy:disabled { opacity: 0.35; cursor: not-allowed; }
+    #shop-panel .shop-close {
+      margin-top: 12px; padding: 8px 16px;
+      background: #2a2a2a; color: #ddd;
+      border: 1px solid #553; border-radius: 4px;
+      font-family: inherit; cursor: pointer;
+    }
+    #shop-panel .shop-gold { color: #fc4; }
   </style>
 </head>
 <body>
@@ -260,6 +308,8 @@
   <div id="dialogue-panel"></div>
   <div id="combat-log"></div>
   <div id="action-bar"></div>
+  <div id="inv-panel"></div>
+  <div id="shop-panel"></div>
 
   <div id="mobile-controls">
     <div class="mc-stick" id="mc-move"><div class="mc-nub" id="mc-move-nub"></div></div>

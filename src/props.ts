@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { PhysicsWorld } from './physics';
 import { Character } from './character';
+import { OwnerId, ownerForPosition, Inventory } from './inventory';
 
 export type PropKind =
   | 'chair' | 'bottle_wine' | 'bottle_brandy' | 'plate_food'
@@ -40,6 +41,25 @@ export interface PropInstance {
   position: { x: number; y: number; z: number };
   consumed?: boolean;
   payload?: any;
+  /** Who owns this prop. Set after placement via ownerForPosition. */
+  owner: OwnerId;
+  /** What inventory item ID this prop yields when taken (if any). */
+  yieldsItemId?: string;
+}
+
+/** Map prop kind -> default item it yields. */
+const PROP_YIELDS: Partial<Record<PropKind, string>> = {
+  bottle_wine: 'wine_bottle',
+  bottle_brandy: 'brandy_bottle',
+  plate_food: 'plate_meal',
+  book: 'diary', // overridden by label for specific books
+  ruby_necklace: 'ruby_necklace',
+};
+
+function yieldFor(kind: PropKind, label: string): string | undefined {
+  if (label === 'Ledger of accounts') return 'ledger';
+  if (label === "A young man's diary") return 'diary';
+  return PROP_YIELDS[kind];
 }
 
 function woodMat(c: number) { return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 }); }
@@ -283,7 +303,10 @@ export function createProp(kind: PropKind, label: string, x: number, y: number, 
   if (kind !== 'plate_food' && kind !== 'book' && kind !== 'ruby_necklace' && kind !== 'painting' && kind !== 'pillow') {
     physics.addStaticBox(x, y + physicsSize.y / 2, z, physicsSize.x, physicsSize.y, physicsSize.z);
   }
-  return { id: `prop_${propIdCounter++}_${kind}`, kind, label, group, position: { x, y, z }, payload };
+  const isUpper = y >= 5;
+  const owner = ownerForPosition(x, y, z, isUpper);
+  const yieldsItemId = yieldFor(kind, label);
+  return { id: `prop_${propIdCounter++}_${kind}`, kind, label, group, position: { x, y, z }, payload, owner, yieldsItemId };
 }
 
 export function placeMansionProps(scene: THREE.Scene, physics: PhysicsWorld): PropInstance[] {
@@ -382,6 +405,18 @@ export function placeMansionProps(scene: THREE.Scene, physics: PhysicsWorld): Pr
 
 export interface PropInteractResult {
   log: string[];
+  /** True if this interaction was a theft attempt that completed (success or caught). */
+  wasTheft?: boolean;
+  /** Owner if it was theft. */
+  theftOwner?: OwnerId;
+  /** True if player got caught stealing. */
+  caught?: boolean;
+}
+
+export interface TheftContext {
+  /** Caller checks this and supplies witnesses. */
+  witnessRollCheck: (stealthCheckTotal: number) => { caught: boolean; witnessName?: string };
+  inventory: Inventory;
 }
 
 const READABLE_BOOKS: Record<string, string> = {
@@ -398,8 +433,41 @@ export function interactWithProp(
   character: Character,
   worldState: PlayerWorldState,
   scene: THREE.Scene,
+  theft?: TheftContext,
 ): PropInteractResult {
   const log: string[] = [];
+
+  // === THEFT GATE ===
+  // If this prop yields a takable item and the owner is not the player/house, the player is stealing.
+  const isPickup =
+    prop.yieldsItemId !== undefined &&
+    !prop.consumed &&
+    (prop.kind === 'bottle_wine' || prop.kind === 'bottle_brandy' || prop.kind === 'plate_food' ||
+     prop.kind === 'book' || prop.kind === 'ruby_necklace');
+  if (isPickup && theft && prop.owner !== 'player' && prop.owner !== 'unclaimed') {
+    const isTheft = prop.owner !== 'house' || prop.yieldsItemId === 'ruby_necklace';
+    if (isTheft) {
+      const stealthCheck = character.skillCheck('dex', 'stealth');
+      const witnessOutcome = theft.witnessRollCheck(stealthCheck.total);
+      log.push(`You attempt to take ${prop.label} (DEX Stealth ${stealthCheck.total}).`);
+      if (witnessOutcome.caught) {
+        log.push(`*** Caught! ${witnessOutcome.witnessName ?? 'A witness'} sees you. ***`);
+        return { log, wasTheft: true, theftOwner: prop.owner, caught: true };
+      }
+      log.push(`You slip the ${prop.label.toLowerCase()} into your pocket. No one saw.`);
+      theft.inventory.add(prop.yieldsItemId!);
+      // Mark consumed and remove visual
+      scene.remove(prop.group);
+      prop.consumed = true;
+      // Also update worldState flags for objectives
+      if (prop.kind === 'ruby_necklace') worldState.hasNecklace = true;
+      if (prop.kind === 'bottle_wine' || prop.kind === 'bottle_brandy') {
+        worldState.drinksCount = worldState.drinksCount; // consumed via use, not pickup
+      }
+      return { log, wasTheft: true, theftOwner: prop.owner, caught: false };
+    }
+  }
+
   switch (prop.kind) {
     case 'chair':
       log.push(`You take a moment to rest in the ${prop.label.toLowerCase()}.`);

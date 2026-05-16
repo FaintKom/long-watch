@@ -18,6 +18,7 @@ import { CLASSES, ClassId, applyClass } from './classes';
 import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
 import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState } from './props';
+import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId } from './inventory';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -61,9 +62,41 @@ const castMembers: CastMember[] = (Object.keys(CAST) as CastId[]).map(id => new 
 // === Clue props ===
 const clueProps: CluePropInstance[] = buildClueProps(scene);
 
-// === Mansion props (chairs, bottles, plates, books, vases, etc.) ===
+// === Mansion props ===
 const props: PropInstance[] = placeMansionProps(scene, physics);
 const worldState: PlayerWorldState = newPlayerWorldState();
+const inventory = new Inventory();
+const reputation = newReputation();
+
+function lineOfSight(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+  const steps = Math.ceil(Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2) * 3);
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = Math.floor(ax + (bx - ax) * t);
+    const y = Math.floor(ay + (by - ay) * t);
+    const z = Math.floor(az + (bz - az) * t);
+    if (world.isOpaque(x, y, z)) return false;
+  }
+  return true;
+}
+
+function witnessCheck(stealthTotal: number, ownerId: OwnerId): { caught: boolean; witnessName?: string } {
+  const pos = player.getPosition();
+  // The owner of the item is the strongest witness if nearby. Other NPCs check too.
+  for (const cm of castMembers) {
+    if (cm.def.id === 'gardener') continue; // gardener is outside
+    const npcP = cm.body.position;
+    const dist = Math.sqrt((pos.x - npcP.x) ** 2 + (pos.y - npcP.y) ** 2 + (pos.z - npcP.z) ** 2);
+    if (dist > 12) continue;
+    if (!lineOfSight(pos.x, pos.y + 1.5, pos.z, npcP.x, npcP.y + 1.4, npcP.z)) continue;
+    // Stand-in passive perception: 10 + WIS mod (estimated). Take 10 + 2 = 12.
+    const perception = 12 + (cm.def.id === ownerId ? 3 : 0); // owner is more vigilant
+    if (stealthTotal < perception) {
+      return { caught: true, witnessName: cm.def.displayName };
+    }
+  }
+  return { caught: false };
+}
 
 function nearestProp(): PropInstance | null {
   const pos = player.getPosition();
@@ -242,6 +275,77 @@ startBtn?.addEventListener('click', () => {
   renderer.domElement.requestPointerLock();
 });
 
+function renderInventoryPanel() {
+  const el = document.getElementById('inv-panel');
+  if (!el) return;
+  let html = '<h4>INVENTORY</h4>' +
+    `<div class="inv-line gold-line"><span>Gold</span><span>${inventory.gold} gp</span></div>`;
+  if (inventory.stacks.length === 0) {
+    html += '<div style="color:#888">(empty)</div>';
+  } else {
+    for (const s of inventory.stacks) {
+      const def = ITEM_DEFS[s.defId];
+      if (!def) continue;
+      const countStr = def.stackable ? ` x${s.count}` : '';
+      html += `<div class="inv-line"><span>${def.name}${countStr}</span><span style="color:#888">${def.value}gp</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+renderInventoryPanel();
+
+let shopActiveNpc: CastMember | null = null;
+function openShop(cm: CastMember) {
+  const offers = SHOP_INVENTORIES[cm.def.id];
+  if (!offers || offers.length === 0) {
+    logCombat(`${cm.def.displayName} has nothing to sell.`);
+    return;
+  }
+  shopActiveNpc = cm;
+  document.exitPointerLock?.();
+  renderShop();
+}
+function closeShop() {
+  shopActiveNpc = null;
+  document.getElementById('shop-panel')!.classList.remove('active');
+  setTimeout(() => renderer.domElement.requestPointerLock(), 100);
+}
+function renderShop() {
+  const panel = document.getElementById('shop-panel')!;
+  if (!shopActiveNpc) { panel.classList.remove('active'); return; }
+  const offers = SHOP_INVENTORIES[shopActiveNpc.def.id] || [];
+  let html = `<h3>${shopActiveNpc.def.displayName} — Shop</h3>` +
+    `<div style="margin-bottom:10px"><span class="shop-gold">Your gold: ${inventory.gold} gp</span></div>`;
+  for (const offer of offers) {
+    const def = ITEM_DEFS[offer.itemId];
+    if (!def) continue;
+    const canAfford = inventory.gold >= offer.price && offer.stock !== 0;
+    html += `<div class="shop-row">` +
+      `<div><b>${def.name}</b><br><span style="color:#888;font-size:11px">${offer.stock < 0 ? '∞' : offer.stock} in stock</span></div>` +
+      `<div style="text-align:right"><div class="shop-gold">${offer.price} gp</div>` +
+      `<button class="shop-buy" data-item="${offer.itemId}" ${!canAfford ? 'disabled' : ''}>Buy</button></div>` +
+      `</div>`;
+  }
+  html += `<button class="shop-close">Close (Esc)</button>`;
+  panel.innerHTML = html;
+  panel.classList.add('active');
+  panel.querySelectorAll('.shop-buy').forEach((b) => {
+    b.addEventListener('click', () => {
+      const itemId = (b as HTMLElement).dataset.item!;
+      const offer = offers.find(o => o.itemId === itemId);
+      if (!offer || inventory.gold < offer.price || offer.stock === 0) return;
+      inventory.gold -= offer.price;
+      if (offer.stock > 0) offer.stock--;
+      inventory.add(itemId);
+      adjustRep(reputation, shopActiveNpc!.def.id, 2);
+      logCombat(`Bought ${ITEM_DEFS[itemId].name} for ${offer.price} gp.`);
+      renderShop();
+      renderInventoryPanel();
+    });
+  });
+  panel.querySelector('.shop-close')?.addEventListener('click', () => closeShop());
+}
+
 function renderActionBar() {
   const bar = document.getElementById('action-bar');
   if (!bar) return;
@@ -388,13 +492,21 @@ function updateInteractHint() {
   const prop = nearestProp();
   if (prop) {
     const verb = propActionVerb(prop);
-    interactHint.textContent = `[E] ${verb} ${prop.label}`;
+    const isPickup = prop.yieldsItemId && !prop.consumed &&
+      (prop.kind === 'bottle_wine' || prop.kind === 'bottle_brandy' || prop.kind === 'plate_food' ||
+       prop.kind === 'book' || prop.kind === 'ruby_necklace');
+    const willSteal = isPickup && prop.owner !== 'player' && prop.owner !== 'unclaimed' &&
+      !(prop.owner === 'house' && prop.kind !== 'ruby_necklace');
+    const ownership = willSteal ? ` <span style="color:#f55">[STEAL · owner: ${prop.owner}]</span>` : '';
+    interactHint.innerHTML = `[E] ${verb} ${prop.label}${ownership}`;
     interactHint.style.display = 'block';
     return;
   }
   const nearest = nearestCastMember();
   if (nearest) {
-    interactHint.textContent = `[E] Speak with ${nearest.def.displayName}`;
+    const hasShop = !!SHOP_INVENTORIES[nearest.def.id];
+    const shopHint = hasShop ? ' · [T] shop' : '';
+    interactHint.textContent = `[E] Speak with ${nearest.def.displayName}${shopHint}`;
     interactHint.style.display = 'block';
   } else {
     interactHint.style.display = 'none';
@@ -539,8 +651,35 @@ async function streamReply(message: string) {
 
 window.addEventListener('keydown', (e) => {
   if (!started) return;
+  if (shopActiveNpc) {
+    if (e.code === 'Escape') closeShop();
+    return;
+  }
   if (inDialogueWith) {
     if (e.code === 'Escape') closeDialogue();
+    return;
+  }
+  if (e.code === 'KeyT') {
+    // Open shop with nearest cast member who sells
+    const cm = nearestCastMember();
+    if (cm && SHOP_INVENTORIES[cm.def.id]) openShop(cm);
+    else if (cm) logCombat(`${cm.def.displayName} has nothing to sell.`);
+    return;
+  }
+  if (e.code === 'KeyI') {
+    // Use first usable item
+    for (const s of inventory.stacks) {
+      const def = ITEM_DEFS[s.defId];
+      if (def?.onUse) {
+        const lines = def.onUse(character);
+        lines.forEach(logCombat);
+        inventory.remove(s.defId, 1);
+        renderStats();
+        renderInventoryPanel();
+        return;
+      }
+    }
+    logCombat('No usable item.');
     return;
   }
   if (e.code === 'KeyE') {
@@ -551,9 +690,23 @@ window.addEventListener('keydown', (e) => {
     }
     const prop = nearestProp();
     if (prop) {
-      const r = interactWithProp(prop, character, worldState, scene);
+      const r = interactWithProp(prop, character, worldState, scene, {
+        witnessRollCheck: (s) => witnessCheck(s, prop.owner),
+        inventory,
+      });
       r.log.forEach(logCombat);
+      if (r.wasTheft && r.caught && r.theftOwner && r.theftOwner !== 'house' && r.theftOwner !== 'player') {
+        reputation.caughtCount++;
+        reputation.alarmed = true;
+        adjustRep(reputation, r.theftOwner as any, -40);
+        logCombat(`Reputation with ${r.theftOwner} drops sharply.`);
+        if (reputation.caughtCount >= 3) {
+          logCombat('*** The household has had enough of you. ***');
+          triggerEnding('heir_dead'); // banishment
+        }
+      }
       renderStats();
+      renderInventoryPanel();
       return;
     }
     const cm = nearestCastMember();
