@@ -14,6 +14,7 @@ import { CAST, CastMember, CastId } from './cast';
 import { Enemy } from './enemy';
 import { spawnAssassin, SpawnedAssassinGroup } from './assassin';
 import { rollDice, rollNd } from './character';
+import { CLASSES, ClassId, applyClass } from './classes';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -54,9 +55,33 @@ scene.add(player.yaw);
 // === Cast members ===
 const castMembers: CastMember[] = (Object.keys(CAST) as CastId[]).map(id => new CastMember(CAST[id], scene, physics));
 
-// === Character ===
+// === Character + class picker ===
 const character = new Character('Adventurer');
-character.maxHp = 28; character.hp = 28; character.ac = 15;
+let chosenClass: ClassId = 'fighter';
+
+function renderClassPicker() {
+  const picker = document.getElementById('class-picker');
+  if (!picker) return;
+  let html = '';
+  for (const cls of Object.values(CLASSES)) {
+    const sel = cls.id === chosenClass ? ' selected' : '';
+    html += `<div class="class-card${sel}" data-cls="${cls.id}">` +
+      `<h3>${cls.name}</h3>` +
+      `<div class="cls-desc">${cls.description}</div>` +
+      `<div class="cls-stats">HP ${cls.hitDie + Math.floor(cls.hitDie / 2) * 3 + 6 + 4 * modCONmod(cls.stats.con)} · AC ${cls.ac} · ${cls.primary.toUpperCase()} ${cls.stats[cls.primary]}</div>` +
+      `</div>`;
+  }
+  picker.innerHTML = html;
+  picker.querySelectorAll('.class-card').forEach((el) => {
+    el.addEventListener('click', () => {
+      chosenClass = (el as HTMLElement).dataset.cls as ClassId;
+      renderClassPicker();
+    });
+  });
+}
+function modCONmod(con: number) { return Math.floor((con - 10) / 2); }
+applyClass(character, CLASSES[chosenClass]);
+renderClassPicker();
 
 function renderStats() {
   if (!statsEl) return;
@@ -160,6 +185,9 @@ function detectRoomEntry() {
 
 startBtn?.addEventListener('click', () => {
   if (started) return;
+  applyClass(character, CLASSES[chosenClass]);
+  character.name = CLASSES[chosenClass].name;
+  renderStats();
   started = true;
   startScreen!.style.display = 'none';
   renderer.domElement.requestPointerLock();

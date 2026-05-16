@@ -72,6 +72,20 @@
       font-family: inherit; cursor: pointer; letter-spacing: 2px;
     }
     #start-screen button:hover { background: rgba(80,40,10,0.95); }
+    #class-picker {
+      display: flex; gap: 12px; margin: 12px 0 24px 0;
+    }
+    .class-card {
+      width: 180px; padding: 14px;
+      background: rgba(20,12,5,0.95); border: 2px solid #553;
+      border-radius: 6px; cursor: pointer;
+      text-align: left; transition: border-color 0.15s;
+    }
+    .class-card:hover { border-color: #fc4; }
+    .class-card.selected { border-color: #fc4; background: rgba(60,40,10,0.95); }
+    .class-card h3 { color: #fc4; font-size: 16px; margin-bottom: 4px; }
+    .class-card .cls-desc { color: #ccc; font-size: 12px; line-height: 1.4; margin-bottom: 8px; }
+    .class-card .cls-stats { color: #888; font-size: 11px; line-height: 1.4; }
     #start-screen .credit {
       position: absolute; bottom: 16px;
       font-size: 11px; color: #555;
@@ -170,6 +184,8 @@
       <br><br>
       Survive the Long Watch. Defend Wallace. Solve the mystery — who paid for the hit?
     </div>
+    <p style="font-size:13px;color:#fc4;margin-bottom:6px;">Choose your class:</p>
+    <div id="class-picker"></div>
     <button id="start-btn">Begin the Night</button>
     <div class="credit">
       Adapted with respect from <em style="font-style:italic">The Contract</em> by Lucas Zellers ·
