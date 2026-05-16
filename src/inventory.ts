@@ -12,24 +12,32 @@ export interface ItemDef {
   value: number;
   stackable: boolean;
   onUse?: (character: Character) => string[];
+  /** Can be thrown as a projectile. */
+  throwable?: boolean;
+  /** Damage dice when thrown and hits. Defaults to '1d3' if throwable. */
+  damageThrown?: string;
+  /** Color of the projectile sphere visual when thrown. */
+  throwColor?: number;
 }
 
 export const ITEM_DEFS: Record<string, ItemDef> = {
   silver_pieces:    { id: 'silver_pieces',    name: 'Silver pieces',          value: 0,   stackable: true },
   gold_pieces:      { id: 'gold_pieces',      name: 'Gold pieces',            value: 0,   stackable: true },
-  bread:            { id: 'bread',            name: 'Loaf of bread',          value: 2,   stackable: true, onUse: c => { c.heal(3); return ['You eat the bread. +3 HP.']; } },
+  bread:            { id: 'bread',            name: 'Loaf of bread',          value: 2,   stackable: true, onUse: c => { c.heal(3); return ['You eat the bread. +3 HP.']; }, throwable: true, damageThrown: '1d2', throwColor: 0xa07555 },
   bandage:          { id: 'bandage',          name: 'Cloth bandage',          value: 3,   stackable: true, onUse: c => { c.heal(5); return ['You bind a wound. +5 HP.']; } },
-  potion_healing:   { id: 'potion_healing',   name: 'Healing potion',         value: 50,  stackable: true, onUse: c => { const h = rollDice(4) + rollDice(4) + 2; c.heal(h); return [`You quaff the potion. +${h} HP.`]; } },
-  dagger:           { id: 'dagger',           name: 'Steel dagger',           value: 8,   stackable: false },
+  potion_healing:   { id: 'potion_healing',   name: 'Healing potion',         value: 50,  stackable: true, onUse: c => { const h = rollDice(4) + rollDice(4) + 2; c.heal(h); return [`You quaff the potion. +${h} HP.`]; }, throwable: true, damageThrown: '1d4', throwColor: 0x33aa44 },
+  dagger:           { id: 'dagger',           name: 'Steel dagger',           value: 8,   stackable: false, throwable: true, damageThrown: '1d4+2', throwColor: 0xbbbbcc },
   longsword:        { id: 'longsword',        name: 'Longsword',              value: 25,  stackable: false },
-  lantern:          { id: 'lantern',          name: 'Oil lantern',            value: 6,   stackable: false },
-  ruby_necklace:    { id: 'ruby_necklace',    name: 'Ruby necklace',          value: 250, stackable: false },
-  diary:            { id: 'diary',            name: "Heir's diary",           value: 5,   stackable: false },
-  ledger:           { id: 'ledger',           name: 'Account ledger',         value: 10,  stackable: false },
-  wine_bottle:      { id: 'wine_bottle',      name: 'Bottle of wine',         value: 5,   stackable: true },
-  brandy_bottle:    { id: 'brandy_bottle',    name: 'Bottle of brandy',       value: 12,  stackable: true },
-  plate_meal:       { id: 'plate_meal',       name: 'Hot meal',               value: 1,   stackable: true, onUse: c => { c.heal(5); return ['You eat the meal. +5 HP.']; } },
-  honey_cake:       { id: 'honey_cake',       name: 'Honey-cake',             value: 3,   stackable: true, onUse: c => { c.heal(4); return ['Sweet and warm. +4 HP.']; } },
+  lantern:          { id: 'lantern',          name: 'Oil lantern',            value: 6,   stackable: false, throwable: true, damageThrown: '1d4', throwColor: 0xddaa44 },
+  ruby_necklace:    { id: 'ruby_necklace',    name: 'Ruby necklace',          value: 250, stackable: false, throwable: true, damageThrown: '1d2', throwColor: 0xcc1133 },
+  diary:            { id: 'diary',            name: "Heir's diary",           value: 5,   stackable: false, throwable: true, damageThrown: '1d3', throwColor: 0x224488 },
+  ledger:           { id: 'ledger',           name: 'Account ledger',         value: 10,  stackable: false, throwable: true, damageThrown: '1d3', throwColor: 0x3a3018 },
+  wine_bottle:      { id: 'wine_bottle',      name: 'Bottle of wine',         value: 5,   stackable: true,  throwable: true, damageThrown: '1d4', throwColor: 0x882211 },
+  brandy_bottle:    { id: 'brandy_bottle',    name: 'Bottle of brandy',       value: 12,  stackable: true,  throwable: true, damageThrown: '1d4', throwColor: 0xa07020 },
+  plate_meal:       { id: 'plate_meal',       name: 'Hot meal',               value: 1,   stackable: true,  onUse: c => { c.heal(5); return ['You eat the meal. +5 HP.']; }, throwable: true, damageThrown: '1d2', throwColor: 0xeeeedd },
+  honey_cake:       { id: 'honey_cake',       name: 'Honey-cake',             value: 3,   stackable: true,  onUse: c => { c.heal(4); return ['Sweet and warm. +4 HP.']; }, throwable: true, damageThrown: '1d2', throwColor: 0xdd8844 },
+  vase:             { id: 'vase',             name: 'Porcelain vase',         value: 8,   stackable: false, throwable: true, damageThrown: '1d6', throwColor: 0x3355aa },
+  candelabra:       { id: 'candelabra',       name: 'Brass candelabra',       value: 12,  stackable: false, throwable: true, damageThrown: '1d6+1', throwColor: 0xd4a017 },
 };
 
 export interface InventoryStack {

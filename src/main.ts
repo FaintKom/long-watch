@@ -17,8 +17,9 @@ import { rollDice, rollNd } from './character';
 import { CLASSES, ClassId, applyClass } from './classes';
 import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
-import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState } from './props';
-import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId } from './inventory';
+import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState, isPickupable } from './props';
+import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
+import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -67,6 +68,101 @@ const props: PropInstance[] = placeMansionProps(scene, physics);
 const worldState: PlayerWorldState = newPlayerWorldState();
 const inventory = new Inventory();
 const reputation = newReputation();
+
+interface ThrowableProjectile {
+  body: CANNON.Body;
+  mesh: THREE.Mesh;
+  def: ItemDef;
+  ageMs: number;
+  alive: boolean;
+}
+let throwables: ThrowableProjectile[] = [];
+
+function findThrowableItem(): string | null {
+  // Find first throwable in inventory
+  for (const s of inventory.stacks) {
+    const d = ITEM_DEFS[s.defId];
+    if (d?.throwable) return s.defId;
+  }
+  return null;
+}
+
+function throwItem(defId: string) {
+  const def = ITEM_DEFS[defId];
+  if (!def?.throwable) { logCombat('That item cannot be thrown.'); return; }
+  if (!inventory.remove(defId, 1)) return;
+  const eye = player.getEyePosition();
+  const dir = player.getLookDirection();
+  // Spawn slightly in front to avoid self-collision
+  const spawn = eye.clone().add(dir.clone().multiplyScalar(0.5));
+  const body = physics.addDynamicSphere(spawn.x, spawn.y, spawn.z, 0.1, 0.4);
+  body.linearDamping = 0.05;
+  // Velocity = look dir * 16 m/s + slight upward lift
+  const speed = 16;
+  body.velocity.set(dir.x * speed, dir.y * speed + 2, dir.z * speed);
+
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.1, 6, 6),
+    new THREE.MeshStandardMaterial({ color: def.throwColor ?? 0x884422, emissive: def.throwColor ?? 0x884422, emissiveIntensity: 0.1 }),
+  );
+  mesh.position.copy(spawn);
+  scene.add(mesh);
+  throwables.push({ body, mesh, def, ageMs: 0, alive: true });
+  logCombat(`You hurl ${def.name}.`);
+}
+
+function updateThrowables(dtSeconds: number) {
+  let anyHit = false;
+  for (const t of throwables) {
+    if (!t.alive) continue;
+    t.ageMs += dtSeconds * 1000;
+    t.mesh.position.set(t.body.position.x, t.body.position.y, t.body.position.z);
+
+    // Enemy collision
+    if (assassinGroup) {
+      for (const en of assassinGroup.enemies) {
+        if (en.isDead) continue;
+        const dx = en.body.position.x - t.body.position.x;
+        const dy = en.body.position.y + 0.4 - t.body.position.y;
+        const dz = en.body.position.z - t.body.position.z;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d < 0.55) {
+          const dice = t.def.damageThrown ?? '1d3';
+          const m = dice.match(/(\d+)d(\d+)(?:\+(\d+))?/);
+          let dmg = 0;
+          if (m) {
+            const n = parseInt(m[1]);
+            const sides = parseInt(m[2]);
+            const b = m[3] ? parseInt(m[3]) : 0;
+            for (let i = 0; i < n; i++) dmg += Math.floor(Math.random() * sides) + 1;
+            dmg += b;
+          }
+          en.takeHit(dmg);
+          logCombat(`Your thrown ${t.def.name} hits ${en.preset.name} for ${dmg}!`);
+          if (en.isDead) {
+            logCombat(`${en.preset.name} falls.`);
+            en.destroy(scene, physics);
+          }
+          anyHit = true;
+          t.alive = false;
+          scene.remove(t.mesh);
+          try { physics.removeBody(t.body); } catch {}
+          break;
+        }
+      }
+    }
+    // Timeout / fall through floor
+    if (t.alive && (t.ageMs > 4000 || t.body.position.y < -2)) {
+      t.alive = false;
+      scene.remove(t.mesh);
+      try { physics.removeBody(t.body); } catch {}
+    }
+  }
+  if (throwables.some(t => !t.alive)) throwables = throwables.filter(t => t.alive);
+  if (anyHit && assassinGroup && assassinGroup.enemies.every(e => e.isDead)) {
+    triggerEnding('assassin_defeated');
+  }
+}
 
 function lineOfSight(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
   const steps = Math.ceil(Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2) * 3);
@@ -492,10 +588,7 @@ function updateInteractHint() {
   const prop = nearestProp();
   if (prop) {
     const verb = propActionVerb(prop);
-    const isPickup = prop.yieldsItemId && !prop.consumed &&
-      (prop.kind === 'bottle_wine' || prop.kind === 'bottle_brandy' || prop.kind === 'plate_food' ||
-       prop.kind === 'book' || prop.kind === 'ruby_necklace');
-    const willSteal = isPickup && prop.owner !== 'player' && prop.owner !== 'unclaimed' &&
+    const willSteal = isPickupable(prop) && prop.owner !== 'player' && prop.owner !== 'unclaimed' &&
       !(prop.owner === 'house' && prop.kind !== 'ruby_necklace');
     const ownership = willSteal ? ` <span style="color:#f55">[STEAL · owner: ${prop.owner}]</span>` : '';
     interactHint.innerHTML = `[E] ${verb} ${prop.label}${ownership}`;
@@ -526,9 +619,9 @@ function propActionVerb(p: PropInstance): string {
     case 'weapon_rack':        return 'Examine';
     case 'cooking_pot':
     case 'pots_kitchen':       return 'Inspect';
-    case 'candelabra':
+    case 'candelabra':         return 'Take';
+    case 'vase':               return 'Take';
     case 'painting':
-    case 'vase':
     case 'pillow':             return 'Examine';
     default:                   return 'Use';
   }
@@ -667,7 +760,6 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.code === 'KeyI') {
-    // Use first usable item
     for (const s of inventory.stacks) {
       const def = ITEM_DEFS[s.defId];
       if (def?.onUse) {
@@ -682,6 +774,12 @@ window.addEventListener('keydown', (e) => {
     logCombat('No usable item.');
     return;
   }
+  if (e.code === 'KeyG') {
+    const id = findThrowableItem();
+    if (id) { throwItem(id); renderInventoryPanel(); }
+    else logCombat('Nothing to throw.');
+    return;
+  }
   if (e.code === 'KeyE') {
     const clue = nearestClue();
     if (clue) {
@@ -693,6 +791,7 @@ window.addEventListener('keydown', (e) => {
       const r = interactWithProp(prop, character, worldState, scene, {
         witnessRollCheck: (s) => witnessCheck(s, prop.owner),
         inventory,
+        removePhysicsBody: (b) => physics.removeBody(b),
       });
       r.log.forEach(logCombat);
       if (r.wasTheft && r.caught && r.theftOwner && r.theftOwner !== 'house' && r.theftOwner !== 'player') {
@@ -1010,6 +1109,7 @@ function animate() {
   gameClock.driftStep(dt);
   detectRoomEntry();
   updateInteractHint();
+  updateThrowables(dt);
 
   // Enemy tick
   if (assassinGroup && !endingShown) {

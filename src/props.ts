@@ -3,6 +3,7 @@
  * Each prop has a small composite mesh and may respond to E interaction.
  */
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
 import { Character } from './character';
 import { OwnerId, ownerForPosition, Inventory } from './inventory';
@@ -41,10 +42,10 @@ export interface PropInstance {
   position: { x: number; y: number; z: number };
   consumed?: boolean;
   payload?: any;
-  /** Who owns this prop. Set after placement via ownerForPosition. */
   owner: OwnerId;
-  /** What inventory item ID this prop yields when taken (if any). */
   yieldsItemId?: string;
+  /** Static physics body (so we can remove it when the prop is taken). */
+  body?: CANNON.Body;
 }
 
 /** Map prop kind -> default item it yields. */
@@ -52,9 +53,21 @@ const PROP_YIELDS: Partial<Record<PropKind, string>> = {
   bottle_wine: 'wine_bottle',
   bottle_brandy: 'brandy_bottle',
   plate_food: 'plate_meal',
-  book: 'diary', // overridden by label for specific books
+  book: 'diary',
   ruby_necklace: 'ruby_necklace',
+  vase: 'vase',
+  candelabra: 'candelabra',
 };
+
+/** Set of prop kinds that can be picked up (and thus stolen / thrown). */
+const PICKUPABLE_KINDS = new Set<PropKind>([
+  'bottle_wine', 'bottle_brandy', 'plate_food', 'book',
+  'ruby_necklace', 'vase', 'candelabra',
+]);
+
+export function isPickupable(p: PropInstance): boolean {
+  return !p.consumed && p.yieldsItemId !== undefined && PICKUPABLE_KINDS.has(p.kind);
+}
 
 function yieldFor(kind: PropKind, label: string): string | undefined {
   if (label === 'Ledger of accounts') return 'ledger';
@@ -300,13 +313,14 @@ export function createProp(kind: PropKind, label: string, x: number, y: number, 
   }
   group.position.set(x, y, z);
   scene.add(group);
+  let body: CANNON.Body | undefined;
   if (kind !== 'plate_food' && kind !== 'book' && kind !== 'ruby_necklace' && kind !== 'painting' && kind !== 'pillow') {
-    physics.addStaticBox(x, y + physicsSize.y / 2, z, physicsSize.x, physicsSize.y, physicsSize.z);
+    body = physics.addStaticBox(x, y + physicsSize.y / 2, z, physicsSize.x, physicsSize.y, physicsSize.z);
   }
   const isUpper = y >= 5;
   const owner = ownerForPosition(x, y, z, isUpper);
   const yieldsItemId = yieldFor(kind, label);
-  return { id: `prop_${propIdCounter++}_${kind}`, kind, label, group, position: { x, y, z }, payload, owner, yieldsItemId };
+  return { id: `prop_${propIdCounter++}_${kind}`, kind, label, group, position: { x, y, z }, payload, owner, yieldsItemId, body };
 }
 
 export function placeMansionProps(scene: THREE.Scene, physics: PhysicsWorld): PropInstance[] {
@@ -414,9 +428,10 @@ export interface PropInteractResult {
 }
 
 export interface TheftContext {
-  /** Caller checks this and supplies witnesses. */
   witnessRollCheck: (stealthCheckTotal: number) => { caught: boolean; witnessName?: string };
   inventory: Inventory;
+  /** Optional callback to remove a static physics body when the prop is taken. */
+  removePhysicsBody?: (body: CANNON.Body) => void;
 }
 
 const READABLE_BOOKS: Record<string, string> = {
@@ -437,15 +452,10 @@ export function interactWithProp(
 ): PropInteractResult {
   const log: string[] = [];
 
-  // === THEFT GATE ===
-  // If this prop yields a takable item and the owner is not the player/house, the player is stealing.
-  const isPickup =
-    prop.yieldsItemId !== undefined &&
-    !prop.consumed &&
-    (prop.kind === 'bottle_wine' || prop.kind === 'bottle_brandy' || prop.kind === 'plate_food' ||
-     prop.kind === 'book' || prop.kind === 'ruby_necklace');
-  if (isPickup && theft && prop.owner !== 'player' && prop.owner !== 'unclaimed') {
-    const isTheft = prop.owner !== 'house' || prop.yieldsItemId === 'ruby_necklace';
+  // === PICKUP / THEFT GATE ===
+  if (isPickupable(prop) && theft) {
+    const isOwned = prop.owner !== 'player' && prop.owner !== 'unclaimed' && prop.owner !== 'house';
+    const isTheft = isOwned || prop.kind === 'ruby_necklace';
     if (isTheft) {
       const stealthCheck = character.skillCheck('dex', 'stealth');
       const witnessOutcome = theft.witnessRollCheck(stealthCheck.total);
@@ -456,22 +466,25 @@ export function interactWithProp(
       }
       log.push(`You slip the ${prop.label.toLowerCase()} into your pocket. No one saw.`);
       theft.inventory.add(prop.yieldsItemId!);
-      // Mark consumed and remove visual
       scene.remove(prop.group);
+      if (prop.body) theft.removePhysicsBody?.(prop.body);
       prop.consumed = true;
-      // Also update worldState flags for objectives
       if (prop.kind === 'ruby_necklace') worldState.hasNecklace = true;
-      if (prop.kind === 'bottle_wine' || prop.kind === 'bottle_brandy') {
-        worldState.drinksCount = worldState.drinksCount; // consumed via use, not pickup
-      }
       return { log, wasTheft: true, theftOwner: prop.owner, caught: false };
+    } else {
+      // Free pickup (your room / house items)
+      log.push(`You pick up ${prop.label}.`);
+      theft.inventory.add(prop.yieldsItemId!);
+      scene.remove(prop.group);
+      if (prop.body) theft.removePhysicsBody?.(prop.body);
+      prop.consumed = true;
+      return { log };
     }
   }
 
   switch (prop.kind) {
     case 'chair':
-      log.push(`You take a moment to rest in the ${prop.label.toLowerCase()}.`);
-      character.heal(1);
+      log.push(`You glance at the ${prop.label.toLowerCase()}.`);
       break;
     case 'bottle_wine':
     case 'bottle_brandy':
