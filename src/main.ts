@@ -21,7 +21,8 @@ import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance,
 import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
 import { defaultRelationships, isHostile, adjustAttitude } from './faction';
 import { Companion, KARLA } from './companion';
-import { WorldFeed, formatEventsForPrompt } from './events';
+import { WorldFeed } from './events';
+import { Memory, formatMemoryForPrompt } from './memory';
 import { isVisibleOnFloor } from './fov';
 import { setNavWorld } from './nav';
 import * as CANNON from 'cannon-es';
@@ -416,14 +417,16 @@ paintClock();
 
 let assassinGroup: SpawnedAssassinGroup | null = null;
 const combatLog: string[] = [];
-const worldFeed = new WorldFeed();
-/** Log to UI combat log AND chronicle to world feed (public). For targeted events use worldFeed.add directly. */
+const memory = new Memory();
+/** Backwards-compat alias for code that still reads the raw feed (e.g. save/load). */
+const worldFeed: WorldFeed = memory.feed;
+/** Log to UI combat log AND chronicle to long-term memory (public visibility). For targeted events use memory.addEvent with a CastId[] visibility. */
 function logCombat(line: string) {
   combatLog.push(line);
   console.log('[Long Watch]', line);
   const el = document.getElementById('combat-log');
   if (el) el.innerHTML = combatLog.slice(-8).map(l => `<div>${l}</div>`).join('');
-  worldFeed.add(line, gameClock.state.currentMinute, 'public');
+  memory.addEvent(line, gameClock.state.currentMinute, 'public');
 }
 
 gameClock.onTick = (e) => {
@@ -821,9 +824,12 @@ async function streamReply(message: string) {
     if (reputation.alarmed) attitudeContext += ' The household is ON ALARM tonight (intrusion or theft has occurred).';
 
     const personaWithRep = cm.def.persona.persona + '\n\nCURRENT MOOD CONTEXT: ' + attitudeContext;
-    const recentEvents = worldFeed.recentFor(cm.def.id, 8);
-    const eventsBlock = formatEventsForPrompt(recentEvents);
+    const currentMinute = gameClock.state.currentMinute;
+    const memoryItems = memory.relevantFor(cm.def.id, message, currentMinute, 8);
+    const eventsBlock = formatMemoryForPrompt(memoryItems);
     const currentTime = gameClock.formatted();
+    // Kick a reflection if this NPC has accumulated enough new events. Fire-and-forget.
+    memory.maybeReflect(cm.def.id, cm.def.displayName, cm.def.persona.persona, currentMinute);
 
     const resp = await fetch('/api/npc-chat', {
       method: 'POST',

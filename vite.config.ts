@@ -145,12 +145,113 @@ function npcChatPlugin(env: Record<string, string>): Plugin {
   };
 }
 
+/**
+ * NPC reflection proxy. Frontend posts:
+ *   { displayName, personaSnippet, events: [{minute, text}, ...] }
+ * We ask Groq for 1-3 short first-person reflections the NPC has formed.
+ * Returns: { reflections: string[] }.
+ */
+function npcReflectPlugin(env: Record<string, string>): Plugin {
+  return {
+    name: 'npc-reflect-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/npc-reflect', async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('Method Not Allowed');
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body);
+            const { displayName, personaSnippet, events } = payload as {
+              displayName: string;
+              personaSnippet: string;
+              events: { minute: number; text: string }[];
+            };
+
+            const eventBlock = (events || [])
+              .slice(-20)
+              .map((e) => `- [${e.minute}min] ${e.text}`)
+              .join('\n');
+
+            const systemPrompt = [
+              `You are ${displayName}. ${personaSnippet}`,
+              ``,
+              `You have just had a moment to think about what you have witnessed tonight.`,
+              `Read the chronological list of events you saw or heard, then write 1-3 short FIRST-PERSON reflection bullets capturing what stood out to you, in your own voice. Match the language of the events.`,
+              ``,
+              `Rules:`,
+              `- Each bullet under 25 words.`,
+              `- First person, present tense or past tense (your choice).`,
+              `- Do NOT recite events verbatim - SYNTHESIZE: name fears, suspicions, decisions, grudges.`,
+              `- Speak in character. No meta language. No "I am an NPC", no game terms.`,
+              `- Output ONLY the bullets, one per line, prefixed with "- ".`,
+            ].join('\n');
+
+            const userPrompt = `Events you witnessed tonight:\n${eventBlock || '(nothing notable)'}\n\nWrite 1-3 reflection bullets now.`;
+
+            const apiKey = env.GROQ_API_KEY;
+            const model = env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+            if (!apiKey) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: 'Missing GROQ_API_KEY' }));
+              return;
+            }
+
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: userPrompt },
+                ],
+                temperature: 0.7,
+                max_tokens: 220,
+                stream: false,
+              }),
+            });
+
+            if (!groqRes.ok) {
+              const errText = await groqRes.text();
+              res.statusCode = groqRes.status;
+              res.end(JSON.stringify({ error: errText.slice(0, 500) }));
+              return;
+            }
+
+            const data = await groqRes.json() as { choices?: { message?: { content?: string } }[] };
+            const raw = data.choices?.[0]?.message?.content ?? '';
+            const reflections = raw
+              .split('\n')
+              .map((line) => line.replace(/^\s*[-*+]?\s*/, '').trim())
+              .filter((line) => line.length > 0 && line.length <= 240)
+              .slice(0, 3);
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ reflections }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(err) }));
+          }
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
     root: '.',
     publicDir: 'public',
     server: { port: 3100 },
-    plugins: [npcChatPlugin(env)],
+    plugins: [npcChatPlugin(env), npcReflectPlugin(env)],
   };
 });
