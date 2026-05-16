@@ -362,13 +362,101 @@ function npcBeatPlugin(env: Record<string, string>): Plugin {
   };
 }
 
+/**
+ * NPC-to-NPC dialogue proxy. Two NPCs co-located in the manor pass a brief
+ * exchange. Frontend posts:
+ *   { a: {id, displayName, persona}, b: {id, displayName, persona},
+ *     flags: string, currentTime: string, aRecentEvents: string, bRecentEvents: string }
+ * We ask Groq for ONE short two-line exchange (A then B). Returns:
+ *   { lines: [{npcId, text}, {npcId, text}] }
+ */
+function npcTalkPlugin(env: Record<string, string>): Plugin {
+  return {
+    name: 'npc-talk-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/npc-talk', async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end('Method Not Allowed'); return; }
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body);
+            const { a, b, flags, currentTime, aRecentEvents, bRecentEvents } = payload as {
+              a: { id: string; displayName: string; persona: string };
+              b: { id: string; displayName: string; persona: string };
+              flags: string; currentTime: string;
+              aRecentEvents: string; bRecentEvents: string;
+            };
+
+            const systemPrompt = [
+              `You write a 2-line exchange between two NPCs in a manor at ${currentTime}.`,
+              `One line each. Each line max 20 words. They speak in character. They may share or hide what they know.`,
+              `Output format: exactly two lines:`,
+              `${a.id}: <line>`,
+              `${b.id}: <line>`,
+              `No extra commentary. Match the language of their personas.`,
+            ].join('\n');
+            const userPrompt = [
+              `=== ${a.displayName} (${a.id}) ===`, a.persona,
+              `Recent events they know: ${aRecentEvents || '(none)'}`,
+              ``,
+              `=== ${b.displayName} (${b.id}) ===`, b.persona,
+              `Recent events they know: ${bRecentEvents || '(none)'}`,
+              ``,
+              `World flags: ${flags || '(none)'}`,
+              ``,
+              `Write the two-line exchange now.`,
+            ].join('\n');
+
+            const apiKey = env.GROQ_API_KEY;
+            const model = env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+            if (!apiKey) { res.statusCode = 500; res.end(JSON.stringify({ error: 'Missing GROQ_API_KEY' })); return; }
+
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model,
+                messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+                temperature: 0.7, max_tokens: 180, stream: false,
+              }),
+            });
+            if (!groqRes.ok) {
+              const errText = await groqRes.text();
+              res.statusCode = groqRes.status; res.end(JSON.stringify({ error: errText.slice(0, 500) }));
+              return;
+            }
+            const data = await groqRes.json() as { choices?: { message?: { content?: string } }[] };
+            const raw = data.choices?.[0]?.message?.content ?? '';
+            const lines: { npcId: string; text: string }[] = [];
+            const ids = new Set([a.id, b.id]);
+            for (const line of raw.split('\n')) {
+              const m = line.match(/^\s*([a-z_]+)\s*:\s*(.+)$/);
+              if (!m) continue;
+              if (!ids.has(m[1])) continue;
+              const text = m[2].trim().replace(/^["'']+|["'']+$/g, '');
+              if (text.length > 0 && text.length <= 200) lines.push({ npcId: m[1], text });
+              if (lines.length >= 2) break;
+            }
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ lines }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(err) }));
+          }
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
     root: '.',
     publicDir: 'public',
     server: { port: 3100 },
-    plugins: [npcChatPlugin(env), npcReflectPlugin(env), npcBeatPlugin(env)],
+    plugins: [npcChatPlugin(env), npcReflectPlugin(env), npcBeatPlugin(env), npcTalkPlugin(env)],
     build: {
       // Iter 40: split heavy libs into separate chunks so the initial JS
       // payload only pulls what the boot path needs. Lazy game features

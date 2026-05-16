@@ -77,6 +77,47 @@ scene.add(player.yaw);
 // === Cast members ===
 const castMembers: CastMember[] = (Object.keys(CAST) as CastId[]).map(id => new CastMember(CAST[id], scene, physics));
 
+// === Commoners (atmosphere; no AI dialogue, no schedules) ===
+// Three procedurally-named figures milling about the courtyard. Static so they
+// don't tangle with cast AI, but they have name sprites for ambience.
+{
+  const courtyardSpots = [
+    { x: 12, z: 35 },
+    { x: 17, z: 41 },
+    { x: 21, z: 38 },
+  ];
+  for (const spot of courtyardSpots) {
+    const g = new THREE.Group();
+    const torso = new THREE.Mesh(
+      new THREE.BoxGeometry(0.45, 0.7, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x554433, roughness: 0.85 }),
+    );
+    torso.castShadow = true;
+    g.add(torso);
+    const head = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.32, 0.32),
+      new THREE.MeshStandardMaterial({ color: 0xddbb99 }),
+    );
+    head.position.y = 0.5;
+    g.add(head);
+    const name = (window as { __names?: { commonerName?: () => string } }).__names?.commonerName?.() ?? 'Stranger';
+    const canvas = document.createElement('canvas');
+    canvas.width = 200; canvas.height = 50;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#ccc'; ctx.font = '22px serif'; ctx.textAlign = 'center';
+      ctx.fillText(name, 100, 32);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    sprite.position.y = 1.2;
+    sprite.scale.set(1.2, 0.3, 1);
+    g.add(sprite);
+    g.position.set(spot.x, 1.4, spot.z);
+    scene.add(g);
+  }
+}
+
 // === Clue props ===
 const clueProps: CluePropInstance[] = buildClueProps(scene);
 
@@ -1274,6 +1315,71 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   }
 }
 
+// --- NPC-to-NPC dialogue (occasional) ---
+const lastTalkAt = new Map<string, number>(); // pair key -> in-game minute
+const talkInFlight = new Set<string>();
+function pairKey(a: string, b: string): string { return [a, b].sort().join('|'); }
+
+function tryNpcTalkPair(a: CastMember, b: CastMember): void {
+  if (a.isDead || b.isDead) return;
+  if (a.aiState !== 'idle' && a.aiState !== 'alarmed') return;
+  if (b.aiState !== 'idle' && b.aiState !== 'alarmed') return;
+  const key = pairKey(a.def.id, b.def.id);
+  if (talkInFlight.has(key)) return;
+  const last = lastTalkAt.get(key) ?? -9999;
+  if (gameClock.state.currentMinute - last < 20) return; // 20 in-game min cooldown
+  // Distance + LOS
+  const ax = a.body.position.x, az = a.body.position.z;
+  const bx = b.body.position.x, bz = b.body.position.z;
+  if (Math.abs(a.body.position.y - b.body.position.y) > 2) return;
+  if (Math.sqrt((ax - bx) ** 2 + (az - bz) ** 2) > 2.5) return;
+  if (!lineOfSight(ax, a.body.position.y + 1.4, az, bx, b.body.position.y + 1.4, bz)) return;
+
+  talkInFlight.add(key);
+  lastTalkAt.set(key, gameClock.state.currentMinute);
+
+  const aRecent = memory.feed.recentFor(a.def.id, 4).map(e => e.text).join(' / ');
+  const bRecent = memory.feed.recentFor(b.def.id, 4).map(e => e.text).join(' / ');
+
+  fetch('/api/npc-talk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      a: { id: a.def.id, displayName: a.def.displayName, persona: a.def.persona.persona },
+      b: { id: b.def.id, displayName: b.def.displayName, persona: b.def.persona.persona },
+      flags: formatFlagsForPrompt(consequences.all()),
+      currentTime: gameClock.formatted(),
+      aRecentEvents: aRecent,
+      bRecentEvents: bRecent,
+    }),
+  })
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`npc-talk ${r.status}`);
+      const data = (await r.json()) as { lines?: { npcId: string; text: string }[] };
+      const lines = data.lines ?? [];
+      for (const ln of lines) {
+        const text = `${ln.npcId === a.def.id ? a.def.displayName : b.def.displayName}: "${ln.text}"`;
+        // Both NPCs hear it (proximity); push as scoped event.
+        memory.addEvent(`[overheard] ${text}`, gameClock.state.currentMinute, [a.def.id, b.def.id]);
+      }
+      if (lines.length > 0) console.log('[npc-talk]', a.def.id, '<>', b.def.id, lines);
+    })
+    .catch((e) => console.warn('[npc-talk] failed:', e))
+    .finally(() => { talkInFlight.delete(key); });
+}
+
+let npcTalkCheckClock = 0;
+function tickNpcTalk(dt: number): void {
+  npcTalkCheckClock += dt;
+  if (npcTalkCheckClock < 5.0) return;
+  npcTalkCheckClock = 0;
+  for (let i = 0; i < castMembers.length; i++) {
+    for (let j = i + 1; j < castMembers.length; j++) {
+      tryNpcTalkPair(castMembers[i], castMembers[j]);
+    }
+  }
+}
+
 // --- NPC-to-NPC rumor diffusion ---
 let rumorClock = 0;
 function tickRumorDiffusion(dt: number): void {
@@ -1877,6 +1983,7 @@ function animate() {
   tickCatacombsLoot();
   tickCatacombsEnemies(dt);
   tickRumorDiffusion(dt);
+  tickNpcTalk(dt);
   if (mp) {
     const p = player.getPosition();
     mp.pushSelfPos(p.x, p.y, p.z, player.yaw.rotation.y, character.name);
