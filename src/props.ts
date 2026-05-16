@@ -210,9 +210,154 @@ function buildPainting(): THREE.Group {
   const g = new THREE.Group();
   const frame = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.04), woodMat(0xa57a3a));
   g.add(frame);
+  // Iter 62: layered canvas. Inner deep-violet background + a few coloured
+  // splotches give "old portrait" feel without an actual texture file.
   const canvas = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.6, 0.045), clothMat(0x4a3a55));
   g.add(canvas);
+  const figure = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.046), clothMat(0xddaa88));
+  figure.position.y = 0.0;
+  g.add(figure);
+  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.047), clothMat(0x221015));
+  hair.position.y = 0.16;
+  g.add(hair);
+  const collar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.046), clothMat(0x882244));
+  collar.position.y = -0.12;
+  g.add(collar);
   return g;
+}
+
+// Iter 62 helpers - visual decor only (no PropInstance, no physics, no theft).
+
+function buildRug(width: number, depth: number, color: number, accent: number): THREE.Group {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(width, 0.03, depth), clothMat(color));
+  base.position.y = 0.015;
+  base.receiveShadow = true;
+  g.add(base);
+  const borderW = Math.max(0.05, width * 0.06);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(width, 0.031, borderW), clothMat(accent));
+  top.position.set(0, 0.016, depth / 2 - borderW / 2);
+  g.add(top);
+  const bottom = top.clone();
+  bottom.position.z = -(depth / 2 - borderW / 2);
+  g.add(bottom);
+  const left = new THREE.Mesh(new THREE.BoxGeometry(borderW, 0.031, depth), clothMat(accent));
+  left.position.set(-(width / 2 - borderW / 2), 0.016, 0);
+  g.add(left);
+  const right = left.clone();
+  right.position.x = width / 2 - borderW / 2;
+  g.add(right);
+  return g;
+}
+
+function buildBookshelf(): THREE.Group {
+  const g = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.8, 0.3), woodMat(0x3a2010));
+  frame.position.y = 0.9;
+  frame.castShadow = true;
+  g.add(frame);
+  const palette = [0x5e2a1a, 0x2a4a6a, 0x4a3a1a, 0x2a3a2a, 0x6a3a3a, 0x3a3a5a];
+  for (let row = 0; row < 4; row++) {
+    for (let i = 0; i < 8; i++) {
+      const w = 0.07 + Math.random() * 0.03;
+      const h = 0.18 + Math.random() * 0.06;
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      const book = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.18), clothMat(c));
+      book.position.set(-0.4 + i * 0.1, 0.25 + row * 0.4 + h / 2, 0.04);
+      g.add(book);
+    }
+  }
+  return g;
+}
+
+function buildArmchair(): THREE.Group {
+  const g = new THREE.Group();
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.18, 0.6), clothMat(0x5a3a2a));
+  seat.position.y = 0.4;
+  seat.castShadow = true;
+  g.add(seat);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.6, 0.12), clothMat(0x5a3a2a));
+  back.position.set(0, 0.78, -0.24);
+  g.add(back);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.5), clothMat(0x4a2a1a));
+  armL.position.set(-0.27, 0.6, 0.05);
+  g.add(armL);
+  const armR = armL.clone();
+  armR.position.x = 0.27;
+  g.add(armR);
+  const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.5), clothMat(0x884466));
+  cushion.position.y = 0.53;
+  g.add(cushion);
+  return g;
+}
+
+function buildMirror(): THREE.Group {
+  const g = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.85, 0.05), woodMat(0xa57a3a));
+  g.add(frame);
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(0.36, 0.72, 0.054),
+    new THREE.MeshStandardMaterial({ color: 0xccddee, metalness: 0.6, roughness: 0.2 }),
+  );
+  g.add(glass);
+  return g;
+}
+
+function buildChandelier(): THREE.Group {
+  const g = new THREE.Group();
+  const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.0, 6), metalMat(0x444444));
+  chain.position.y = 0.5;
+  g.add(chain);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.025, 8, 16), metalMat(0xaa7733));
+  ring.rotation.x = Math.PI / 2;
+  g.add(ring);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const cx = Math.cos(a) * 0.3;
+    const cz = Math.sin(a) * 0.3;
+    const cand = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.18, 6), clothMat(0xeeddaa));
+    cand.position.set(cx, 0.09, cz);
+    g.add(cand);
+    const flame = new THREE.PointLight(0xffaa55, 0.3, 4, 2);
+    flame.position.set(cx, 0.22, cz);
+    g.add(flame);
+  }
+  return g;
+}
+
+/** Iter 62: decor pass - no physics, no interaction, just atmosphere meshes. */
+export function placeMansionDecor(scene: THREE.Scene): void {
+  function place(group: THREE.Group, x: number, y: number, z: number, rotY = 0): void {
+    group.position.set(x, y, z);
+    group.rotation.y = rotY;
+    scene.add(group);
+  }
+  // Rugs
+  place(buildRug(6, 4, 0x551a1a, 0xddaa55), 17.5, 1.01, 11);   // Entry hall
+  place(buildRug(4, 3, 0x2a3a4a, 0xaa8844), 6, 1.01, 9);        // Study
+  place(buildRug(5, 3, 0x4a2a1a, 0xddbb77), 30, 6.51, 10);      // Wallace bedroom
+  place(buildRug(4, 3, 0x3a2a4a, 0xaa9966), 5, 6.51, 10);       // Magrath bedroom
+
+  // Bookshelves (library)
+  place(buildBookshelf(), 2, 6.51, 22, 0);
+  place(buildBookshelf(), 2, 6.51, 24, 0);
+  place(buildBookshelf(), 2, 6.51, 26, 0);
+
+  // Armchairs (study + library)
+  place(buildArmchair(), 6, 1.01, 11, Math.PI);
+  place(buildArmchair(), 31, 6.51, 23, -Math.PI / 2);
+
+  // Mirrors
+  place(buildMirror(), 5, 7.5, 4.05, 0);
+  place(buildMirror(), 14, 2.6, 14.95, Math.PI);
+
+  // Extra paintings (library wall)
+  place(buildPainting(), 0.05, 2.5, 18, Math.PI / 2);
+  place(buildPainting(), 0.05, 2.5, 24, Math.PI / 2);
+
+  // Chandeliers
+  place(buildChandelier(), 30.5, 3.8, 7, 0);
+  place(buildChandelier(), 17.5, 3.8, 8, 0);
 }
 
 function buildWeaponRack(): THREE.Group {

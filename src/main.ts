@@ -17,7 +17,7 @@ import { rollDice, rollNd, rollFormula, rollAttackDamage } from './character';
 import { CLASSES, ClassId, applyClass } from './classes';
 import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
-import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState, isPickupable } from './props';
+import { placeMansionProps, placeMansionDecor, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState, isPickupable } from './props';
 import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
 import { defaultRelationships, isHostile, adjustAttitude, ASSASSIN_FACTION } from './faction';
 import { Companion, KARLA } from './companion';
@@ -166,6 +166,7 @@ const clueProps: CluePropInstance[] = buildClueProps(scene);
 
 // === Mansion props ===
 const props: PropInstance[] = placeMansionProps(scene, physics);
+placeMansionDecor(scene);
 const worldState: PlayerWorldState = newPlayerWorldState();
 const inventory = new Inventory();
 const reputation = newReputation();
