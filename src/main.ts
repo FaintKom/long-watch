@@ -1642,6 +1642,46 @@ function checkCatacombsExit() {
 }
 
 let endingShown = false;
+/** Boss-specific epilogue paragraph keyed by BossId. */
+const BOSS_EPILOGUES: Record<string, string> = {
+  forewaters:     'The Forewaters retreat to their counting-house. Magrath puts three of their captains on a quiet list.',
+  assassin_guild: "The Guild's seal goes on the table next to your gold. Magrath sends a letter to the Guildmaster - it does not request peace.",
+  sea_goddess:    "Salt water dries on the floorboards. A new shrine to a kinder sea-spirit is commissioned by morning.",
+  forsythe:       "Forsythe Forewater's name is spoken once in the study, then never again in this house. The matriarch's hand shakes - then steadies.",
+  unseelie:       "A pale lord in a faded coat appears in the hall one hour after dawn. He bows. The debt is renegotiated, not forgiven.",
+  sentient_sword: "Sunder is bound in cold iron, locked in a cellar drawer with the family rings. It is screaming.",
+  right_hand:     "The Right Hand sets his red scarf on the study desk and leaves through the kitchen door before sunrise.",
+  freelance:      "No paymaster, no signature. Magrath stares at the corpse a long time before she speaks.",
+};
+
+/** Twist-specific aside woven into the dawn ending. */
+function twistEpilogues(): string {
+  const t = plot.twists;
+  const lines: string[] = [];
+  if (t.includes('heir_is_dragon')) {
+    lines.push('Wallace politely declines breakfast and locks himself in the conservatory. Mira swears the glass was warm.');
+  }
+  if (t.includes('heir_is_daughter')) {
+    lines.push('Magrath calls Wallace "her" exactly once over tea. Nobody comments.');
+  }
+  if (t.includes('poisoned_heir')) {
+    lines.push('The cook finds nightshade ground into the breakfast salt. She empties the jar into the courtyard fire.');
+  }
+  if (t.includes('fake_death')) {
+    lines.push('A maid finds a cult symbol in Wallace\'s pillow. He is not in his bed.');
+  }
+  if (t.includes('doppelganger_matriarch')) {
+    lines.push('In the cellar passage a bound woman wakes, gagged. Magrath the doppelganger has vanished.');
+  }
+  if (t.includes('assassin_kin')) {
+    lines.push('A letter is found on the dead assassin - addressed to one of your own party. The handwriting is family.');
+  }
+  return lines.length === 0 ? '' :
+    `<div style="margin-top:10px;color:#aaa;font-style:italic">` +
+    lines.map(l => `&middot; ${l}`).join('<br>') +
+    `</div>`;
+}
+
 function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player_dead' | 'heir_dead' | 'escaped_catacombs') {
   if (endingShown) return;
   endingShown = true;
@@ -1654,11 +1694,13 @@ function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player
     title.textContent = 'DAWN';
     title.style.color = '#fc4';
     const bossLine = plot.revealed.boss
-      ? `<div style="margin-top:8px;color:#fc4">You proved the Boss: <b>${BOSSES[plot.boss].name}</b>. Magrath adds 1,000 gold to the purse.</div>`
-      : '<div style="margin-top:8px;color:#aaa">You could not prove who paid for the hit.</div>';
+      ? `<div style="margin-top:8px;color:#fc4">You proved the Boss: <b>${BOSSES[plot.boss].name}</b>. Magrath adds 1,000 gold to the purse.</div>` +
+        `<div style="margin-top:6px;color:#ddd">${BOSS_EPILOGUES[plot.boss] ?? ''}</div>`
+      : '<div style="margin-top:8px;color:#aaa">You could not prove who paid for the hit. Magrath pays the contract but her eyes are already on the next ledger.</div>';
     body.innerHTML =
       `<p>The Heir lives. Magrath presses 1,000 gold pieces into your hand.</p>` +
       bossLine +
+      twistEpilogues() +
       `<p style="margin-top:14px;color:#888;font-size:12px">Your objective was: <b>${summary.myObjective.name}</b></p>`;
   } else if (reason === 'escaped_catacombs') {
     title.textContent = 'ESCAPED';
