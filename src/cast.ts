@@ -484,7 +484,7 @@ export class CastMember {
 
     // Try to upgrade box mesh with MagicaVoxel model if asset exists in /models/.
     // Fire-and-forget; fallback box stays visible until/unless the model loads.
-    void tryUpgradeWithVox(VOX_KEYS.cast[def.id], this.group, { scale: 0.045, yOffset: -0.4 });
+    void tryUpgradeWithVox(VOX_KEYS.cast[def.id], this.group, { scale: 0.04, yOffset: -0.05 });
   }
 
   pushHistory(role: 'user' | 'assistant', content: string) {

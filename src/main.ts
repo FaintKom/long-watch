@@ -23,6 +23,8 @@ import { defaultRelationships, isHostile, adjustAttitude } from './faction';
 import { Companion, KARLA } from './companion';
 import { WorldFeed } from './events';
 import { Memory, formatMemoryForPrompt } from './memory';
+import { ConsequenceStore, formatFlagsForPrompt } from './consequences';
+import { buildCatacombs, Catacombs } from './catacombs';
 import { isVisibleOnFloor } from './fov';
 import { setNavWorld } from './nav';
 import * as CANNON from 'cannon-es';
@@ -418,6 +420,7 @@ paintClock();
 let assassinGroup: SpawnedAssassinGroup | null = null;
 const combatLog: string[] = [];
 const memory = new Memory();
+const consequences = new ConsequenceStore();
 /** Backwards-compat alias for code that still reads the raw feed (e.g. save/load). */
 const worldFeed: WorldFeed = memory.feed;
 /** Log to UI combat log AND chronicle to long-term memory (public visibility). For targeted events use memory.addEvent with a CastId[] visibility. */
@@ -431,15 +434,21 @@ function logCombat(line: string) {
 
 gameClock.onTick = (e) => {
   paintClock();
-  if (e.triggerWarning) logCombat('A chill runs through the manor. Something draws near.');
+  if (e.triggerWarning) {
+    logCombat('A chill runs through the manor. Something draws near.');
+    consequences.set('assassin_arrival_imminent', true, gameClock.state.currentMinute);
+  }
   if (e.triggerAssassin) {
     assassinGroup = spawnAssassin(plot.assassin, scene, physics, mansion);
     logCombat(assassinGroup.flavor);
     plot.revealed.assassin = true;
+    consequences.set('assassin_arrived', true, gameClock.state.currentMinute);
+    consequences.set('assassin_kind', plot.assassin, gameClock.state.currentMinute);
     renderObjectiveCard();
   }
   if (e.triggerDawn) {
     logCombat('Dawn breaks. The Heir survives.');
+    consequences.set('dawn_reached', true, gameClock.state.currentMinute);
     triggerEnding('heir_alive_dawn');
   }
 };
@@ -828,6 +837,15 @@ async function streamReply(message: string) {
     const memoryItems = memory.relevantFor(cm.def.id, message, currentMinute, 8);
     const eventsBlock = formatMemoryForPrompt(memoryItems);
     const currentTime = gameClock.formatted();
+    // Per-NPC top-2 reflections injected separately so the model sees the
+    // distilled "voice" before raw events (Bobby-Gray pattern #1).
+    const topReflections = (memory.reflections.get(cm.def.id) ?? [])
+      .slice(-2)
+      .map(r => `- ${r.text}`)
+      .join('\n');
+    // Consequence flags this NPC knows about.
+    const flagsKnown = consequences.knownBy(cm.def.id);
+    const flagsBlock = formatFlagsForPrompt(flagsKnown);
     // Kick a reflection if this NPC has accumulated enough new events. Fire-and-forget.
     memory.maybeReflect(cm.def.id, cm.def.displayName, cm.def.persona.persona, currentMinute);
 
@@ -847,6 +865,8 @@ async function streamReply(message: string) {
         speechStyle: cm.def.persona.speechStyle,
         voiceSamples: cm.def.persona.voiceSamples,
         recentEvents: eventsBlock,
+        topReflections,
+        worldFlags: flagsBlock,
         currentTime,
         history: cm.history.slice(0, -1),
         message,
@@ -934,6 +954,10 @@ window.addEventListener('keydown', (e) => {
     }
     const prop = nearestProp();
     if (prop) {
+      if (prop.kind === 'trapdoor') {
+        enterCatacombs();
+        return;
+      }
       const r = interactWithProp(prop, character, worldState, scene, {
         witnessRollCheck: (s) => witnessCheck(s, prop.owner),
         inventory,
@@ -1007,6 +1031,8 @@ function examineClue(c: CluePropInstance) {
   logCombat(`Roll ${res.roll} (total ${res.total}) vs DC ${c.def.check.dc}: ${res.passed ? 'PASS' : 'FAIL'} - ${res.text}`);
   if (res.revealedBoss) {
     logCombat(`*** You have proven the Boss. ***`);
+    consequences.set('boss_proven', true, gameClock.state.currentMinute);
+    consequences.set('boss_id', plot.boss, gameClock.state.currentMinute);
     renderObjectiveCard();
   }
 }
@@ -1093,6 +1119,9 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   if (byPlayer && result.firstHitByPlayer) {
     adjustRep(reputation, cm.def.id as any, -50);
     reputation.alarmed = true;
+    consequences.set('household_alarmed', true, gameClock.state.currentMinute);
+    consequences.set(`player_attacked_${cm.def.id}`, true, gameClock.state.currentMinute);
+    consequences.inc('cast_npcs_attacked_by_player', 1, gameClock.state.currentMinute);
     // Tank faction relationship — fletcher_house now hostile to player_party
     adjustAttitude(factionRel, 'fletcher_house', 'player_party', -40);
     adjustAttitude(factionRel, 'player_party', 'fletcher_house', -40);
@@ -1121,8 +1150,34 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   }
 }
 
+// --- Act-2 catacombs (escape route) ---
+let catacombs: Catacombs | null = null;
+let inCatacombs = false;
+function enterCatacombs() {
+  if (inCatacombs) return;
+  inCatacombs = true;
+  logCombat('You descend through the trapdoor into damp stone.');
+  consequences.set('entered_catacombs', true, gameClock.state.currentMinute);
+  // Hide the mansion mesh and freeze cast meshes so they don't render below.
+  world.group.visible = false;
+  for (const cm of castMembers) cm.group.visible = false;
+  catacombs = buildCatacombs(scene, physics, { seed: plot.bossRoll });
+  player.setPosition(catacombs.spawn.x, catacombs.spawn.y, catacombs.spawn.z);
+  player.yaw.position.set(catacombs.spawn.x, catacombs.spawn.y, catacombs.spawn.z);
+}
+
+function checkCatacombsExit() {
+  if (!inCatacombs || !catacombs || endingShown) return;
+  const p = player.getPosition();
+  if (catacombs.isOnExit(p)) {
+    logCombat('You stumble out into the dockside fog. The Heir is far behind you - and so is the contract.');
+    consequences.set('escaped_via_catacombs', true, gameClock.state.currentMinute);
+    triggerEnding('escaped_catacombs');
+  }
+}
+
 let endingShown = false;
-function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player_dead' | 'heir_dead') {
+function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player_dead' | 'heir_dead' | 'escaped_catacombs') {
   if (endingShown) return;
   endingShown = true;
   document.exitPointerLock?.();
@@ -1139,6 +1194,13 @@ function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player
     body.innerHTML =
       `<p>The Heir lives. Magrath presses 1,000 gold pieces into your hand.</p>` +
       bossLine +
+      `<p style="margin-top:14px;color:#888;font-size:12px">Your objective was: <b>${summary.myObjective.name}</b></p>`;
+  } else if (reason === 'escaped_catacombs') {
+    title.textContent = 'ESCAPED';
+    title.style.color = '#fa6';
+    body.innerHTML =
+      `<p>You surface in the dockside fog. No gold, no patron, no Heir on your conscience.</p>` +
+      `<p style="margin-top:8px;color:#aaa">Magrath will hunt your name through every port that owes her a favor.</p>` +
       `<p style="margin-top:14px;color:#888;font-size:12px">Your objective was: <b>${summary.myObjective.name}</b></p>`;
   } else {
     title.textContent = 'YOU FAILED';
@@ -1337,6 +1399,7 @@ function animate() {
   detectRoomEntry();
   updateInteractHint();
   updateThrowables(dt);
+  checkCatacombsExit();
 
   // === Cast AI ===
   tickCastAi(dt);

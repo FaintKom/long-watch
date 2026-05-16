@@ -48,7 +48,9 @@ Env: `.env` with `GROQ_API_KEY=...` (gitignored). Optional `GROQ_MODEL=`.
 | `nav.ts` | Per-entity `Navigator` (rot-js A*) with replan caching + drift detection. Module-level `setNavWorld(world)` registers the voxel world at boot; `Enemy`/`CastMember`/`Companion` each own a `Navigator` and call `steerToward(my, target, floorY)` for waypoint-aware movement instead of straight-line. |
 | `memory.ts` | NPC long-term memory: wraps `WorldFeed` with reflections (Groq-summarised first-person bullets per NPC) + retrieval. `memory.relevantFor(npcId, query, currentMinute, k)` returns mixed top-K events + reflections scored by recency (60min half-life) + lexical Jaccard + importance. `memory.maybeReflect(...)` fires when an NPC has >= 8 unreflected events - hits `/api/npc-reflect`. |
 | `names.ts` | `fantastical` wrappers: `commonerName()`, `speciesName(species, gender)`, `tavernName()`, `guildName()`, `commonerParty(n)`. Used by `assassin.ts` for mook/cult leader naming and exposed via `__names` in console. |
-| `dungenGen.ts` | `Labyrinthos` wrapper: `generateDungeon({width,height,algorithm})` -> `DungeonGrid {data, spawn, exit, isFloor, isWall}`. `generateCatacombs(seed)` preset for the planned act-2 escape route. Voxel build-out from grid deferred to a later iteration. |
+| `dungenGen.ts` | `Labyrinthos` wrapper: `generateDungeon({width,height,algorithm})` -> `DungeonGrid {data, spawn, exit, isFloor, isWall}`. `generateCatacombs(seed)` preset for the act-2 escape route. |
+| `catacombs.ts` | Extrudes a `DungeonGrid` into a Three.js + cannon-es sub-level positioned at `Y_OFFSET=30` (above mansion roof). InstancedMesh walls, per-cell static colliders, sparse torch lights, exit ring marker. `buildCatacombs(scene, physics, {seed})` returns `{root, spawn, exit, bodies, isOnExit, dispose}`. `main.ts` calls it when the player interacts with the trapdoor prop in the storage room. |
+| `consequences.ts` | `ConsequenceStore` flag map keyed by lowercase_snake_case strings. `set/get/has/inc/knownBy/all`. Flags wired at: warning tick, assassin arrival, dawn, first-NPC-attack, boss-proven, catacombs entry/exit. Format via `formatFlagsForPrompt` for the Groq prompt. |
 
 ---
 
@@ -160,7 +162,12 @@ npm run dev             # http://localhost:3100
 - **Iter 21**: Throwables via cannon-es dynamic spheres. Removed chair-sit healing.
 - **Iter 22-30**: Full faction system, player-attacks-NPC handling, companion (Karla), reputation gates, save/load, mobile controls, Heir AI variants.
 - **Iter 31**: Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
-- **Iter 35** (current): Tier-3 final cleanup from `docs/INTEGRATIONS.md`.
+- **Iter 36** (current): Four parallel additions wrapping up `docs/REFERENCE_PROMPTS.md` "next steals".
+  - **Catacombs sub-level.** `src/catacombs.ts` extrudes `generateCatacombs(seed)` grid into Three.js + cannon-es geometry at `Y_OFFSET=30`. New `trapdoor` prop kind in `src/props.ts` placed in the storage room. Interacting hides the mansion meshes, teleports the player to catacombs spawn, exit ring marker triggers a new `escaped_catacombs` ending. Per-frame `checkCatacombsExit()` polls.
+  - **Consequence flag store.** `src/consequences.ts` `ConsequenceStore` with `set/has/inc/knownBy`. Wired at warning/arrival/dawn/first-attack/boss-proven/catacombs. Flags injected into the Groq npc-chat system prompt as ground-truth world state (pattern #4: consequence > event for clues).
+  - **Per-NPC prompt polish.** `streamReply` now sends top-2 personal reflections AND consequence flags separately. Vite proxy lays them out as `=== YOUR LATEST THOUGHTS ===` + `=== WORLD STATE FLAGS YOU KNOW ABOUT ===` blocks. Pattern #1: distilled voice notes per-NPC, not whole roster.
+  - **gen-vox v2.** `tools/gen-vox.mjs` rewritten with Minecraft-proportion humanoids (12x6x32) + per-character `traits` (cape, sabres, scarf, apron, tailcoat, gloves, hat, hood, robe, beard, horns, wings, tail, staff, shovel, etc). Each of the 17 entries now has distinct silhouette. All `.vox` files regenerated (240-572 unique voxels each). Vox-upgrade scale adjusted to 0.04 with yOffset -0.05 to fit the taller models.
+- **Iter 35**: Tier-3 final cleanup from `docs/INTEGRATIONS.md`.
   - `fantastical` -> `src/names.ts` (commoner/species/tavern/guild). Wired into `spawnAssassin` so the lead Mook gets a procedural name ("Velex steps to the front, blade drawn.") and Cult of Umberlee gets a drow priest name.
   - `Labyrinthos.js` -> `src/dungenGen.ts` with `generateDungeon` + `generateCatacombs` preset. Voxel build deferred; `tools/preview-catacombs.mjs` for ASCII inspection.
   - `Bobby-Gray/claude-dnd-skill` distilled into `docs/REFERENCE_PROMPTS.md` (5 patterns + top-3 next steals). Not imported as a skill.

@@ -72,7 +72,7 @@ export class Companion {
     scene.add(this.group);
 
     const voxKey = (VOX_KEYS.companion as Record<string, string>)[def.id];
-    if (voxKey) void tryUpgradeWithVox(voxKey, this.group, { scale: 0.045, yOffset: -0.4 });
+    if (voxKey) void tryUpgradeWithVox(voxKey, this.group, { scale: 0.04, yOffset: -0.05 });
   }
 
   syncMesh() {

@@ -150,7 +150,7 @@ export class Enemy {
     scene.add(this.group);
 
     const voxKey = (VOX_KEYS.enemy as Record<string, string>)[kind];
-    if (voxKey) void tryUpgradeWithVox(voxKey, this.group, { scale: 0.045, yOffset: -0.4 });
+    if (voxKey) void tryUpgradeWithVox(voxKey, this.group, { scale: 0.04, yOffset: -0.05 });
   }
 
   syncMesh() {

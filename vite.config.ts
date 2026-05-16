@@ -27,7 +27,7 @@ function npcChatPlugin(env: Record<string, string>): Plugin {
             const {
               npcName, persona, knownFacts, hiddenFacts, speechStyle,
               backstory, positionTonight, motivation, dailyRoutine, relationships,
-              voiceSamples, recentEvents, currentTime,
+              voiceSamples, recentEvents, topReflections, worldFlags, currentTime,
               history, message,
             } = payload;
 
@@ -67,6 +67,8 @@ function npcChatPlugin(env: Record<string, string>): Plugin {
               `=== SPEECH STYLE ===`,
               speechStyle,
               voiceSamples ? `\n=== VOICE SAMPLES (imitate cadence, do NOT quote verbatim) ===\n${voiceSamples}\n` : '',
+              topReflections ? `=== YOUR LATEST THOUGHTS (your own reflections, your voice) ===\n${topReflections}\n` : '',
+              worldFlags ? `=== WORLD STATE FLAGS YOU KNOW ABOUT ===\n${worldFlags}\nUse these as ground truth. If a flag contradicts a past event in the log, the flag wins. Never invent flags not on this list.\n` : '',
               `=== RECENT EVENTS YOU HAVE WITNESSED OR HEARD OF TONIGHT ===`,
               recentEvents || '(none yet - the night is quiet)',
             ].filter(Boolean).join('\n');

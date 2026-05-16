@@ -12,7 +12,8 @@ export type PropKind =
   | 'chair' | 'bottle_wine' | 'bottle_brandy' | 'plate_food'
   | 'book' | 'crate' | 'cooking_pot' | 'vase'
   | 'candelabra' | 'painting' | 'pillow' | 'weapon_rack'
-  | 'ruby_necklace' | 'chest_locked' | 'pots_kitchen';
+  | 'ruby_necklace' | 'chest_locked' | 'pots_kitchen'
+  | 'trapdoor';
 
 export interface PlayerWorldState {
   drinksCount: number;
@@ -290,6 +291,29 @@ function buildKitchenPots(): THREE.Group {
   return g;
 }
 
+function buildTrapdoor(): THREE.Group {
+  const g = new THREE.Group();
+  const panel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 0.06, 0.9),
+    new THREE.MeshStandardMaterial({ color: 0x3a2010, roughness: 0.85 }),
+  );
+  panel.position.y = 0.03;
+  panel.receiveShadow = true;
+  g.add(panel);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.1, 0.022, 8, 16),
+    metalMat(0x555555),
+  );
+  ring.position.set(0.2, 0.075, 0);
+  ring.rotation.x = Math.PI / 2;
+  g.add(ring);
+  // Subtle glow so the player can find it.
+  const glow = new THREE.PointLight(0xffaa44, 0.7, 3, 2);
+  glow.position.set(0, 0.4, 0);
+  g.add(glow);
+  return g;
+}
+
 let propIdCounter = 0;
 export function createProp(kind: PropKind, label: string, x: number, y: number, z: number, scene: THREE.Scene, physics: PhysicsWorld, payload?: any): PropInstance {
   let group: THREE.Group;
@@ -310,11 +334,12 @@ export function createProp(kind: PropKind, label: string, x: number, y: number, 
     case 'ruby_necklace': group = buildNecklace();        physicsSize = { x: 0.18, y: 0.1, z: 0.18 }; break;
     case 'chest_locked':  group = buildChestLocked();     physicsSize = { x: 0.7, y: 0.46, z: 0.5 }; break;
     case 'pots_kitchen':  group = buildKitchenPots();     physicsSize = { x: 0.7, y: 0.2, z: 0.3 }; break;
+    case 'trapdoor':      group = buildTrapdoor();        physicsSize = { x: 0.9, y: 0.06, z: 0.9 }; break;
   }
   group.position.set(x, y, z);
   scene.add(group);
   let body: CANNON.Body | undefined;
-  if (kind !== 'plate_food' && kind !== 'book' && kind !== 'ruby_necklace' && kind !== 'painting' && kind !== 'pillow') {
+  if (kind !== 'plate_food' && kind !== 'book' && kind !== 'ruby_necklace' && kind !== 'painting' && kind !== 'pillow' && kind !== 'trapdoor') {
     body = physics.addStaticBox(x, y + physicsSize.y / 2, z, physicsSize.x, physicsSize.y, physicsSize.z);
   }
   const isUpper = y >= 5;
@@ -413,6 +438,9 @@ export function placeMansionProps(scene: THREE.Scene, physics: PhysicsWorld): Pr
   props.push(createProp('crate', 'Old storage crate', 42, 6, 22, scene, physics));
   props.push(createProp('crate', 'Old storage crate', 44, 6, 22, scene, physics));
   props.push(createProp('chest_locked', 'Old sealed chest', 46, 6, 24, scene, physics));
+
+  // Hidden trapdoor in storage room floor - leads to the catacombs (act-2 escape).
+  props.push(createProp('trapdoor', 'Trapdoor (smells of damp stone)', 44, 1.05, 27, scene, physics));
 
   return props;
 }
