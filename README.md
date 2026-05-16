@@ -36,7 +36,25 @@ Open `http://localhost:3100`.
 
 ## Status
 
-Pre-alpha. Engine systems being assembled from the voxel-rpg base. Mansion level under construction.
+**Alpha — solo playable.**
+
+Working systems:
+- Voxel mansion (18 rooms, 2 floors, courtyard, garden, stairs, windows)
+- FPS controller with crouch / sprint / jump
+- D&D 5e Lv 4 character with Fighter / Rogue / Wizard / Cleric pick on start screen
+- Plot roll system (1d8 Boss / 1d6 Assassin / 1d8 Twist / 1d12 Objective)
+- Game clock (event-driven + idle drift, dawn at 5 AM)
+- 7 AI-driven cast NPCs (Magrath, Wallace, Right Hand, Cook, Butler, Maid, Gardener) with strict in-character guardrails via Groq Llama 3.3
+- Assassin encounters with 6 spawn sets (Mooks, Sea Cult, Crimson Angel, Sebek-Ari, Mezzoloth, Air Elemental)
+- LMB melee combat (d20 + 5 vs AC, longsword 1d8+3, crit on 20)
+- Combat log + end screen (DAWN payout / banishment for Heir's death)
+
+Planned (skeleton in place):
+- Colyseus multiplayer for 3-4 players (`src/state.ts` shape ready)
+- Skill checks UI for clues that reveal Boss/Twist
+- Full spell system for Wizard / Cleric
+- Class signature actions (Second Wind, Sneak Attack, Channel Divinity)
+- Save/load (server-authoritative)
 
 ## Plot pieces
 
