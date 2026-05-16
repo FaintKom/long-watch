@@ -118,6 +118,16 @@ function updateThrowables(dtSeconds: number) {
     t.ageMs += dtSeconds * 1000;
     t.mesh.position.set(t.body.position.x, t.body.position.y, t.body.position.z);
 
+    const dice = t.def.damageThrown ?? '1d3';
+    function rollDmg(): number {
+      const m = dice.match(/(\d+)d(\d+)(?:\+(\d+))?/);
+      if (!m) return 1;
+      const n = parseInt(m[1]);
+      const sides = parseInt(m[2]);
+      const b = m[3] ? parseInt(m[3]) : 0;
+      let r = 0; for (let i = 0; i < n; i++) r += Math.floor(Math.random() * sides) + 1;
+      return r + b;
+    }
     // Enemy collision
     if (assassinGroup) {
       for (const en of assassinGroup.enemies) {
@@ -127,23 +137,30 @@ function updateThrowables(dtSeconds: number) {
         const dz = en.body.position.z - t.body.position.z;
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (d < 0.55) {
-          const dice = t.def.damageThrown ?? '1d3';
-          const m = dice.match(/(\d+)d(\d+)(?:\+(\d+))?/);
-          let dmg = 0;
-          if (m) {
-            const n = parseInt(m[1]);
-            const sides = parseInt(m[2]);
-            const b = m[3] ? parseInt(m[3]) : 0;
-            for (let i = 0; i < n; i++) dmg += Math.floor(Math.random() * sides) + 1;
-            dmg += b;
-          }
+          const dmg = rollDmg();
           en.takeHit(dmg);
           logCombat(`Your thrown ${t.def.name} hits ${en.preset.name} for ${dmg}!`);
-          if (en.isDead) {
-            logCombat(`${en.preset.name} falls.`);
-            en.destroy(scene, physics);
-          }
+          if (en.isDead) { logCombat(`${en.preset.name} falls.`); en.destroy(scene, physics); }
           anyHit = true;
+          t.alive = false;
+          scene.remove(t.mesh);
+          try { physics.removeBody(t.body); } catch {}
+          break;
+        }
+      }
+    }
+    // Cast collision
+    if (t.alive) {
+      for (const cm of castMembers) {
+        if (cm.isDead) continue;
+        const dx = cm.body.position.x - t.body.position.x;
+        const dy = cm.body.position.y + 0.4 - t.body.position.y;
+        const dz = cm.body.position.z - t.body.position.z;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d < 0.55) {
+          const dmg = rollDmg();
+          logCombat(`Your thrown ${t.def.name} strikes ${cm.def.displayName}!`);
+          handleCastDamage(cm, dmg, true);
           t.alive = false;
           scene.remove(t.mesh);
           try { physics.removeBody(t.body); } catch {}
@@ -853,30 +870,46 @@ function examineClue(c: CluePropInstance) {
   }
 }
 
-// LMB to attack nearest enemy in reach
+// LMB to attack — prefers nearest enemy in reach, then cast member (intentional violence)
 const PLAYER_MELEE_REACH = 2.0;
 window.addEventListener('mousedown', (e) => {
   if (!started || inDialogueWith || endingShown) return;
   if (e.button !== 0 || !document.pointerLockElement) return;
-  if (!assassinGroup) return;
-  // Find nearest live enemy in reach
+
   const pos = player.getPosition();
-  let target: Enemy | null = null;
-  let bestDist = PLAYER_MELEE_REACH;
-  for (const en of assassinGroup.enemies) {
-    if (en.isDead) continue;
-    const dx = en.body.position.x - pos.x;
-    const dz = en.body.position.z - pos.z;
-    const d = Math.sqrt(dx * dx + dz * dz);
-    if (d < bestDist) { target = en; bestDist = d; }
+  // First: any enemy in reach
+  let enemyTarget: Enemy | null = null;
+  let bestEnemyDist = PLAYER_MELEE_REACH;
+  if (assassinGroup) {
+    for (const en of assassinGroup.enemies) {
+      if (en.isDead) continue;
+      const dx = en.body.position.x - pos.x;
+      const dz = en.body.position.z - pos.z;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (d < bestEnemyDist) { enemyTarget = en; bestEnemyDist = d; }
+    }
   }
-  if (!target) return;
-  // Roll attack
+  if (enemyTarget) { swingAt(enemyTarget); return; }
+
+  // Then: cast member in reach (player chose to hit a friendly)
+  let castTarget: CastMember | null = null;
+  let bestCastDist = PLAYER_MELEE_REACH;
+  for (const cm of castMembers) {
+    if (cm.isDead) continue;
+    const dx = cm.body.position.x - pos.x;
+    const dz = cm.body.position.z - pos.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < bestCastDist) { castTarget = cm; bestCastDist = d; }
+  }
+  if (castTarget) swingAtCast(castTarget);
+});
+
+function swingAt(target: Enemy) {
   const roll = rollDice(20);
-  const total = roll + 5; // +3 STR +2 prof for Lv4 fighter equiv
+  const total = roll + 5;
   if (roll === 1) { logCombat('You miss wildly!'); return; }
   if (roll === 20 || total >= target.preset.ac) {
-    let dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3; // longsword + STR
+    let dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3;
     let sneakDmg = 0;
     if (chosenClass === 'rogue' && sneakReady) {
       sneakDmg = sneakAttackDamage(character);
@@ -888,14 +921,58 @@ window.addEventListener('mousedown', (e) => {
       logCombat(`${target.preset.name} falls.`);
       target.destroy(scene, physics);
     }
-    // Win check
-    if (assassinGroup.enemies.every(e => e.isDead)) {
+    if (assassinGroup && assassinGroup.enemies.every(e => e.isDead)) {
       triggerEnding('assassin_defeated');
     }
   } else {
     logCombat(`Your strike glances off ${target.preset.name}.`);
   }
-});
+}
+
+function swingAtCast(cm: CastMember) {
+  const roll = rollDice(20);
+  const total = roll + 5;
+  if (roll === 1) { logCombat(`Your blade glances off ${cm.def.displayName}.`); return; }
+  if (roll === 20 || total >= cm.character.ac) {
+    const dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3;
+    handleCastDamage(cm, dmg, true);
+  } else {
+    logCombat(`${cm.def.displayName} dodges your strike.`);
+  }
+}
+
+/**
+ * Single funnel for damage applied to a Cast NPC (LMB, throw, AoE).
+ * Updates reputation, household alarm state, ending triggers.
+ */
+function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
+  if (cm.isDead) return;
+  const result = cm.takeHit(dmg, byPlayer);
+  logCombat(`${cm.def.displayName} takes ${dmg} damage. (${cm.character.hp}/${cm.character.maxHp})`);
+  if (byPlayer && result.firstHitByPlayer) {
+    adjustRep(reputation, cm.def.id as any, -50);
+    reputation.alarmed = true;
+    logCombat(`*** ${cm.def.displayName} cries out. The household is alarmed. ***`);
+  }
+  if (result.died) {
+    logCombat(`*** ${cm.def.displayName} falls and does not rise. ***`);
+    if (cm.def.id === 'heir') {
+      triggerEnding('heir_dead');
+      return;
+    }
+    if (cm.def.id === 'matriarch') {
+      logCombat('Without Magrath, the contract is void. You will not see dawn welcome.');
+      triggerEnding('heir_dead');
+      return;
+    }
+    // Other casts: stronger alarm cascade
+    reputation.alarmed = true;
+    for (const other of castMembers) {
+      if (other.isDead || other === cm) continue;
+      adjustRep(reputation, other.def.id as any, -30);
+    }
+  }
+}
 
 let endingShown = false;
 function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player_dead' | 'heir_dead') {
@@ -1110,6 +1187,9 @@ function animate() {
   detectRoomEntry();
   updateInteractHint();
   updateThrowables(dt);
+
+  // Sync cast meshes (they're dynamic bodies now)
+  for (const cm of castMembers) cm.syncMesh();
 
   // Enemy tick
   if (assassinGroup && !endingShown) {

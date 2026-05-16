@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
+import { Character } from './character';
 
 import { TwistId, BossId } from './plot';
 
@@ -26,6 +27,10 @@ export interface CastDef {
   hairColor: number;
   startSpot: { x: number; y: number; z: number };
   persona: CastPersona;
+  /** Combat statblock used when NPC enters combat. */
+  combatStats: { hp: number; ac: number; attackBonus: number; damageDice: string; speed: number };
+  /** What this NPC does the first time it takes damage from the player. */
+  reactionOnPlayerAttack: 'flee' | 'fight' | 'alarm';
 }
 
 export const CAST: Record<CastId, CastDef> = {
@@ -35,6 +40,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x551533,
     hairColor: 0x221015,
     startSpot: { x: 17.5, y: 1.5, z: 8 },
+    combatStats: { hp: 58, ac: 17, attackBonus: 5, damageDice: '1d8+3', speed: 6 }, // Veteran
+    reactionOnPlayerAttack: 'fight',
     persona: {
       persona:
         'Magrath "Red Sky" Fletcher, 45, matriarch of a harbor mercantile empire. ' +
@@ -63,6 +70,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x224455,
     hairColor: 0xddc88a,
     startSpot: { x: 27.5, y: 6.5, z: 10 },
+    combatStats: { hp: 9, ac: 15, attackBonus: 3, damageDice: '1d6+1', speed: 5 }, // Noble, max HP
+    reactionOnPlayerAttack: 'flee',
     persona: {
       persona:
         'Wallace Fletcher, late teens, the Heir. Reedy young man, clothes never quite fit. ' +
@@ -88,6 +97,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x553322,
     hairColor: 0x444444,
     startSpot: { x: 42, y: 6.5, z: 8 },
+    combatStats: { hp: 27, ac: 12, attackBonus: 4, damageDice: '1d6+2', speed: 6 }, // Spy
+    reactionOnPlayerAttack: 'fight',
     persona: {
       persona:
         'A man in his late 30s, salt-and-pepper beard, deep red scarf. Magrath\'s most loyal - or so it seems. ' +
@@ -113,6 +124,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x88aa44,
     hairColor: 0xc8a070,
     startSpot: { x: 42, y: 1.5, z: 7 },
+    combatStats: { hp: 8, ac: 10, attackBonus: 2, damageDice: '1d4', speed: 5 }, // Commoner with skillet
+    reactionOnPlayerAttack: 'alarm',
     persona: {
       persona:
         'A heavyset, no-nonsense cook in her 50s. Apron stained from a long day. Calls everyone "love" or "dearie". ' +
@@ -135,6 +148,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x222233,
     hairColor: 0xdddddd,
     startSpot: { x: 17.5, y: 1.5, z: 5 },
+    combatStats: { hp: 8, ac: 10, attackBonus: 2, damageDice: '1d4', speed: 5 },
+    reactionOnPlayerAttack: 'alarm',
     persona: {
       persona:
         'An elderly butler with crisp posture and a black jacket. Speaks with formal precision. Disapproves of the noise of adventurers in his hall but is too polite to say so.',
@@ -155,6 +170,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x335566,
     hairColor: 0xb87333,
     startSpot: { x: 30, y: 1.5, z: 21 },
+    combatStats: { hp: 6, ac: 10, attackBonus: 1, damageDice: '1d3', speed: 6 },
+    reactionOnPlayerAttack: 'flee',
     persona: {
       persona:
         'A young maid in her early 20s, freckled, curious, secretly reads the books in the library when no one is looking. New to the household (one year). Talks too much when nervous.',
@@ -176,6 +193,8 @@ export const CAST: Record<CastId, CastDef> = {
     bodyColor: 0x556644,
     hairColor: 0xbbbbbb,
     startSpot: { x: 40, y: 1.5, z: 38 },
+    combatStats: { hp: 10, ac: 11, attackBonus: 2, damageDice: '1d6', speed: 5 }, // Has a shovel
+    reactionOnPlayerAttack: 'alarm',
     persona: {
       persona:
         'A wiry old gardener with dirt under his nails and a permanent squint. Tends the herb beds outside. ' +
@@ -193,16 +212,32 @@ export const CAST: Record<CastId, CastDef> = {
   },
 };
 
+export type CastAiState = 'idle' | 'fleeing' | 'fighting' | 'alarmed' | 'dead';
+
 export class CastMember {
   def: CastDef;
   body: CANNON.Body;
   group: THREE.Group;
   history: { role: 'user' | 'assistant'; content: string }[] = [];
+  character: Character;
+  isDead = false;
+  aiState: CastAiState = 'idle';
+  /** Has the player ever attacked this NPC? */
+  attackedByPlayer = false;
+  /** Tick timer used by AI states. */
+  aiTimer = 0;
 
   constructor(def: CastDef, scene: THREE.Scene, physics: PhysicsWorld) {
     this.def = def;
+    this.character = new Character(def.displayName);
+    this.character.maxHp = def.combatStats.hp;
+    this.character.hp = def.combatStats.hp;
+    this.character.ac = def.combatStats.ac;
     const { x, y, z } = def.startSpot;
-    this.body = physics.addStaticBox(x, y, z, 0.6, 1.6, 0.6);
+    // Dynamic so they can move when fleeing/fighting
+    this.body = physics.addDynamicSphere(x, y, z, 0.35, 60);
+    this.body.fixedRotation = true;
+    this.body.linearDamping = 0.9;
 
     this.group = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: def.bodyColor, roughness: 0.7 });
@@ -237,6 +272,30 @@ export class CastMember {
   pushHistory(role: 'user' | 'assistant', content: string) {
     this.history.push({ role, content });
     if (this.history.length > 10) this.history.shift();
+  }
+
+  syncMesh() {
+    this.group.position.set(this.body.position.x, this.body.position.y, this.body.position.z);
+  }
+
+  takeHit(damage: number, byPlayer: boolean): { died: boolean; firstHitByPlayer: boolean } {
+    if (this.isDead) return { died: false, firstHitByPlayer: false };
+    const firstHitByPlayer = byPlayer && !this.attackedByPlayer;
+    if (byPlayer) this.attackedByPlayer = true;
+    this.character.takeDamage(damage);
+    if (this.character.isDead()) {
+      this.isDead = true;
+      this.aiState = 'dead';
+      return { died: true, firstHitByPlayer };
+    }
+    if (byPlayer) {
+      switch (this.def.reactionOnPlayerAttack) {
+        case 'flee': this.aiState = 'fleeing'; break;
+        case 'fight': this.aiState = 'fighting'; break;
+        case 'alarm': this.aiState = 'alarmed'; break;
+      }
+    }
+    return { died: false, firstHitByPlayer };
   }
 }
 
