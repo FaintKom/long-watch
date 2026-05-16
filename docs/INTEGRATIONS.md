@@ -138,15 +138,15 @@ npm i rot-js
 - **After**: scripted Yarn nodes for plot-critical lines (Magrath's briefing, "you have proved the boss"), LLM for everything else.
 - **Risk**: medium. Adds complexity. Maybe skip - user wants pure LLM direction.
 
-### TIER 3 - nice to have, low ROI now
+### TIER 3 - status
 
-| Lib | Why later |
-|-----|-----------|
-| `Labyrinthos.js` | Mansion is hand-built. Use for a future random-dungeon variant. |
-| `DivineVoxelEngine` | Overkill - single mansion, no chunked terrain. Would replace `world.ts` entirely. |
-| `fantasyname` / `fantastical` | Cast NPCs already named. Use if random commoners added. |
-| `Bobby-Gray/claude-dnd-skill` | Reference for prompt design, not direct integration. Read, don't copy. |
-| VS Code Homebrewery extensions | For writing `docs/DESIGN.md` and statblocks. Editor tooling, not in-game. |
+| Lib | Status |
+|-----|--------|
+| `Labyrinthos.js` | **DONE Iter 35.** `src/dungenGen.ts` + `tools/preview-catacombs.mjs`. Voxel build-out deferred (act-2 escape route hook). |
+| `fantastical` | **DONE Iter 35.** `src/names.ts` + wired into `spawnAssassin` (named Mook leader + drow Sea Priest). Exposed via `__names`. |
+| `Bobby-Gray/claude-dnd-skill` | **DONE Iter 35.** Distilled into `docs/REFERENCE_PROMPTS.md`. Reference only, not imported. |
+| VS Code Homebrewery extensions | **DONE Iter 35.** Documented in `docs/DEV.md`. Editor tooling, not a code dep. |
+| `DivineVoxelEngine` | **SKIPPED.** Overkill - single mansion, no chunked terrain. Would replace `world.ts` entirely. |
 
 ---
 

@@ -7,6 +7,7 @@ import { Enemy, EnemyKind } from './enemy';
 import { AssassinId } from './plot';
 import { MansionData } from './mansion';
 import { ASSASSIN_FACTION } from './faction';
+import { commonerName, speciesName, guildName } from './names';
 
 export interface SpawnSet {
   party: EnemyKind[];
@@ -49,5 +50,20 @@ export function spawnAssassin(id: AssassinId, scene: THREE.Scene, physics: Physi
     e.faction = faction;
     enemies.push(e);
   }
-  return { id, enemies, flavor: set.entryFlavor };
+
+  // Flavor: if there's a humanoid party (mooks / cultists), name the leader and tag it onto the entry flavor.
+  let flavor = set.entryFlavor;
+  if (id === 'mooks' && enemies.length > 0) {
+    const leader = commonerName();
+    enemies[0].preset = { ...enemies[0].preset, name: `${leader} (Mook)` };
+    flavor = `${set.entryFlavor} ${leader} steps to the front, blade drawn.`;
+  } else if (id === 'cult_of_umberlee' && enemies.length > 0) {
+    const high = speciesName('drow', Math.random() < 0.5 ? 'female' : 'male');
+    enemies[0].preset = { ...enemies[0].preset, name: `${high} (Sea Priest)` };
+    flavor = `${set.entryFlavor} A drowned voice calls the name ${high}.`;
+  } else if (id === 'sebek_ari' && enemies.length > 0) {
+    const cabal = guildName();
+    flavor = `${set.entryFlavor} The whisper of ${cabal} clings to the air.`;
+  }
+  return { id, enemies, flavor };
 }

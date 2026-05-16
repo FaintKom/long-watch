@@ -1317,7 +1317,10 @@ setupTouchControls();
 setTimeout(applyPendingLoad, 0);
 
 // Expose for debugging
-(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers };
+(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers, memory };
+// Lazy expose dungen + names so console hackers can poke around without inflating cold-start.
+import('./dungenGen').then((m) => { (window as any).__dungen = m; });
+import('./names').then((m) => { (window as any).__names = m; });
 
 let prevTime = performance.now();
 function animate() {

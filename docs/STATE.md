@@ -46,7 +46,9 @@ Env: `.env` with `GROQ_API_KEY=...` (gitignored). Optional `GROQ_MODEL=`.
 | `fov.ts` | rot-js wrapper: `isVisibleOnFloor` (shadowcast + cone), `pathOnFloor` (A*). |
 | `srd.ts` | Loads `/srd/monsters.json` + `/srd/spells.json` from 5e-bits/5e-database. `getMonster(idx)`, `getSpell(idx)`, `firstMeleeAttackFormula`, etc. |
 | `nav.ts` | Per-entity `Navigator` (rot-js A*) with replan caching + drift detection. Module-level `setNavWorld(world)` registers the voxel world at boot; `Enemy`/`CastMember`/`Companion` each own a `Navigator` and call `steerToward(my, target, floorY)` for waypoint-aware movement instead of straight-line. |
-| `memory.ts` | NPC long-term memory: wraps `WorldFeed` with reflections (Groq-summarised first-person bullets per NPC) + retrieval. `memory.relevantFor(npcId, query, currentMinute, k)` returns mixed top-K events + reflections scored by recency (60min half-life) + lexical Jaccard + importance. `memory.maybeReflect(...)` fires when an NPC has >= 8 unreflected events — hits `/api/npc-reflect`. |
+| `memory.ts` | NPC long-term memory: wraps `WorldFeed` with reflections (Groq-summarised first-person bullets per NPC) + retrieval. `memory.relevantFor(npcId, query, currentMinute, k)` returns mixed top-K events + reflections scored by recency (60min half-life) + lexical Jaccard + importance. `memory.maybeReflect(...)` fires when an NPC has >= 8 unreflected events - hits `/api/npc-reflect`. |
+| `names.ts` | `fantastical` wrappers: `commonerName()`, `speciesName(species, gender)`, `tavernName()`, `guildName()`, `commonerParty(n)`. Used by `assassin.ts` for mook/cult leader naming and exposed via `__names` in console. |
+| `dungenGen.ts` | `Labyrinthos` wrapper: `generateDungeon({width,height,algorithm})` -> `DungeonGrid {data, spawn, exit, isFloor, isWall}`. `generateCatacombs(seed)` preset for the planned act-2 escape route. Voxel build-out from grid deferred to a later iteration. |
 
 ---
 
@@ -158,7 +160,13 @@ npm run dev             # http://localhost:3100
 - **Iter 21**: Throwables via cannon-es dynamic spheres. Removed chair-sit healing.
 - **Iter 22-30**: Full faction system, player-attacks-NPC handling, companion (Karla), reputation gates, save/load, mobile controls, Heir AI variants.
 - **Iter 31**: Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
-- **Iter 34** (current): Two parallel additions.
+- **Iter 35** (current): Tier-3 final cleanup from `docs/INTEGRATIONS.md`.
+  - `fantastical` -> `src/names.ts` (commoner/species/tavern/guild). Wired into `spawnAssassin` so the lead Mook gets a procedural name ("Velex steps to the front, blade drawn.") and Cult of Umberlee gets a drow priest name.
+  - `Labyrinthos.js` -> `src/dungenGen.ts` with `generateDungeon` + `generateCatacombs` preset. Voxel build deferred; `tools/preview-catacombs.mjs` for ASCII inspection.
+  - `Bobby-Gray/claude-dnd-skill` distilled into `docs/REFERENCE_PROMPTS.md` (5 patterns + top-3 next steals). Not imported as a skill.
+  - VS Code Homebrewery extensions documented in new `docs/DEV.md`. Not a code dep.
+  - Both new libs typed via `src/types/labyrinthos.d.ts`. Generators exposed as lazy imports on `window.__dungen` / `window.__names` so cold-start stays lean.
+- **Iter 34**: Two parallel additions.
   - **ai-town memory architecture.** New `src/memory.ts` `Memory` class layers reflections + retrieval over `WorldFeed`. Each NPC accumulates an unreflected-event counter; on threshold (default 8) `maybeReflect` POSTs to the new `/api/npc-reflect` Groq endpoint and stores 1-3 first-person summary bullets. `streamReply` now calls `memory.relevantFor(npcId, message, currentMinute, 8)` (recency 0.55 + Jaccard 0.35 + importance 0.10 for events; reflections weighted higher on similarity + importance). Bilingual tokenizer (Latin + Cyrillic). No embedding API dep.
   - **Procedural .vox models.** New `tools/gen-vox.mjs` writes a 10x6x20 voxel humanoid per character using their `bodyColor`/`hairColor`/`skin`/`eye` palette. 17 files generated into `public/models/` (7 cast + Karla + 9 enemies). `threejs-vox-loader` now finds an asset for every NPC; box meshes upgrade to colored figures at runtime. Replace any model with a hand-modeled .vox anytime - loader doesn't care.
 - **Iter 33**: Tier-2 A* pathfinding. New `src/nav.ts` with rot-js A*, per-entity `Navigator` cache (replan on target-move, staleness, or drift). Wired into `Enemy.updateAi` (assassin approach), `CastMember.updateAi` (fleeing toward anchor + fighting toward threat), `Companion.update` (toward enemy + follow player). NPCs now walk around walls and furniture instead of into them. `setNavWorld(world)` called once from `main.ts` after `buildMansion`.
