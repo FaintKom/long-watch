@@ -941,6 +941,11 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') closeDialogue();
     return;
   }
+  if (e.code === 'Escape') {
+    if (pauseMenuOpen) closePause();
+    else openPause();
+    return;
+  }
   if (e.code === 'KeyC') {
     toggleCluePanel();
     return;
@@ -1492,13 +1497,35 @@ document.getElementById('end-restart')?.addEventListener('click', () => window.l
 // === Save / Load (schema v2: adds memory, consequences, gameActor state, seed) ===
 const SAVE_KEY = 'long-watch-save-v2';
 const LEGACY_SAVE_KEY = 'long-watch-save-v1';
+const MAX_SLOTS = 5;
+function slotKey(i: number): string { return `${SAVE_KEY}/slot-${i}`; }
 
-function saveGame() {
+/** List slots with their saved metadata. */
+function listSaveSlots(): { slot: number; exists: boolean; minute?: number; chosenClass?: string; savedAt?: number }[] {
+  const out: { slot: number; exists: boolean; minute?: number; chosenClass?: string; savedAt?: number }[] = [];
+  for (let i = 0; i < MAX_SLOTS; i++) {
+    const raw = localStorage.getItem(slotKey(i));
+    if (!raw) { out.push({ slot: i, exists: false }); continue; }
+    try {
+      const d = JSON.parse(raw);
+      out.push({ slot: i, exists: true, minute: d.clockMinute, chosenClass: d.chosenClass, savedAt: d.savedAt });
+    } catch {
+      out.push({ slot: i, exists: false });
+    }
+  }
+  return out;
+}
+
+/** activeSaveSlot: 0..MAX_SLOTS-1. Defaults to 0; pause menu lets user pick. */
+let activeSaveSlot = 0;
+
+function saveGame(slot: number = activeSaveSlot) {
   if (!started) return;
   try {
     const data = {
       version: 2,
       seed: getSeed(),
+      savedAt: Date.now(),
       chosenClass,
       character: {
         name: character.name,
@@ -1528,19 +1555,23 @@ function saveGame() {
       gamePhase: String(gameActor.getSnapshot().value),
       inCatacombs,
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    logCombat('Game saved.');
+    const json = JSON.stringify(data);
+    localStorage.setItem(slotKey(slot), json);
+    // Also mirror to the legacy single-slot key so /F5 keystroke + auto-recover
+    // still pick something up.
+    localStorage.setItem(SAVE_KEY, json);
+    logCombat(`Game saved to slot ${slot + 1}.`);
   } catch (err) {
     console.error('save error', err);
     logCombat('Save failed.');
   }
 }
 
-function loadGame() {
+function loadGame(slot: number = activeSaveSlot) {
   try {
-    let raw = localStorage.getItem(SAVE_KEY);
+    let raw = localStorage.getItem(slotKey(slot));
+    if (!raw) raw = localStorage.getItem(SAVE_KEY);
     if (!raw) {
-      // Backward compat: try v1 once.
       const legacy = localStorage.getItem(LEGACY_SAVE_KEY);
       if (!legacy) { logCombat('No save found.'); return; }
       raw = legacy;
@@ -1551,6 +1582,27 @@ function loadGame() {
     window.location.reload();
   } catch (err) {
     logCombat('Load failed.');
+  }
+}
+
+/** Returns a base64 string of the current save (active slot). */
+function exportSaveString(): string | null {
+  const raw = localStorage.getItem(slotKey(activeSaveSlot)) ?? localStorage.getItem(SAVE_KEY);
+  if (!raw) return null;
+  try { return btoa(unescape(encodeURIComponent(raw))); } catch { return null; }
+}
+
+/** Decodes a save string and reloads. Returns true on success. */
+function importSaveString(b64: string): boolean {
+  try {
+    const json = decodeURIComponent(escape(atob(b64.trim())));
+    const data = JSON.parse(json);
+    if (data.version !== 1 && data.version !== 2) return false;
+    sessionStorage.setItem('__pendingLoad', json);
+    window.location.reload();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -1696,6 +1748,70 @@ setupTouchControls();
 
 // Run any pending load (after F9 reload)
 setTimeout(applyPendingLoad, 0);
+
+// --- Iter 43: Pause menu wiring ---
+let pauseMenuOpen = false;
+function renderPauseSlots() {
+  const el = document.getElementById('pm-slots');
+  if (!el) return;
+  const slots = listSaveSlots();
+  let html = '';
+  for (const s of slots) {
+    const label = s.exists
+      ? `Slot ${s.slot + 1} - ${s.chosenClass ?? '?'} @ ${Math.floor((s.minute ?? 0) / 60)}:${String((s.minute ?? 0) % 60).padStart(2, '0')}`
+      : `Slot ${s.slot + 1} (empty)`;
+    html += `<div class="pm-slot">`;
+    html += `<span class="pm-slot-label">${label}${activeSaveSlot === s.slot ? ' <b style="color:#fc4">[active]</b>' : ''}</span>`;
+    html += `<button data-slot-pick="${s.slot}">Pick</button>`;
+    if (s.exists) html += `<button data-slot-load="${s.slot}">Load</button>`;
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('button[data-slot-pick]').forEach((b) => {
+    b.addEventListener('click', (ev) => {
+      const i = parseInt((ev.currentTarget as HTMLButtonElement).getAttribute('data-slot-pick') || '0', 10);
+      activeSaveSlot = i;
+      logCombat(`Active save slot: ${i + 1}.`);
+      renderPauseSlots();
+    });
+  });
+  el.querySelectorAll('button[data-slot-load]').forEach((b) => {
+    b.addEventListener('click', (ev) => {
+      const i = parseInt((ev.currentTarget as HTMLButtonElement).getAttribute('data-slot-load') || '0', 10);
+      loadGame(i);
+    });
+  });
+}
+
+function openPause() {
+  if (!started || endingShown) return;
+  pauseMenuOpen = true;
+  document.exitPointerLock?.();
+  const m = document.getElementById('pause-menu');
+  if (m) m.style.display = 'flex';
+  renderPauseSlots();
+}
+function closePause() {
+  pauseMenuOpen = false;
+  const m = document.getElementById('pause-menu');
+  if (m) m.style.display = 'none';
+  if (started && !endingShown) renderer.domElement.requestPointerLock();
+}
+
+document.getElementById('pm-resume')?.addEventListener('click', closePause);
+document.getElementById('pm-save')?.addEventListener('click', () => { saveGame(); renderPauseSlots(); });
+document.getElementById('pm-load')?.addEventListener('click', () => loadGame());
+document.getElementById('pm-export')?.addEventListener('click', () => {
+  const s = exportSaveString();
+  if (!s) { logCombat('No save to export.'); return; }
+  navigator.clipboard?.writeText(s).then(() => logCombat('Save string copied to clipboard.'));
+});
+document.getElementById('pm-import')?.addEventListener('click', () => {
+  const s = window.prompt('Paste save string:');
+  if (!s) return;
+  if (!importSaveString(s)) logCombat('Import failed: bad save string.');
+});
+document.getElementById('pm-quit')?.addEventListener('click', () => window.location.reload());
 
 // Expose for debugging
 (window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers, memory, consequences, gameActor };

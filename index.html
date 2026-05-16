@@ -268,6 +268,32 @@
     #clue-panel .clue-flags { color: #999; font-size: 11px; margin-top: 6px; padding-top: 4px; border-top: 1px dashed #443; }
     #clue-panel .clue-empty { color: #888; font-style: italic; }
 
+    #pause-menu {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+    #pause-menu .pm-card {
+      width: 360px; max-height: 80vh; overflow-y: auto;
+      background: #1a1208; border: 2px solid #fc4; border-radius: 8px;
+      padding: 18px 22px;
+      color: #ddd; font-size: 13px;
+    }
+    #pause-menu h3 { color: #fc4; font-size: 18px; margin-bottom: 12px; letter-spacing: 1px; text-align: center; }
+    #pause-menu .pm-row { margin-bottom: 8px; }
+    #pause-menu button {
+      width: 100%; padding: 8px 12px;
+      background: #2a1d10; color: #fc4;
+      border: 1px solid #553; border-radius: 4px;
+      font-size: 13px; cursor: pointer;
+    }
+    #pause-menu button:hover { background: #3a2818; }
+    #pause-menu .pm-slots { margin-top: 12px; border-top: 1px solid #443; padding-top: 10px; }
+    #pause-menu .pm-slot { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+    #pause-menu .pm-slot .pm-slot-label { flex: 1; color: #aaa; font-size: 11px; }
+    #pause-menu .pm-slot button { width: auto; padding: 4px 10px; font-size: 11px; }
+
     #shop-panel {
       position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
@@ -335,6 +361,18 @@
   <div id="inv-panel"></div>
   <div id="clue-panel"></div>
   <div id="shop-panel"></div>
+  <div id="pause-menu" style="display:none">
+    <div class="pm-card">
+      <h3>PAUSED</h3>
+      <div class="pm-row"><button id="pm-resume">Resume (Esc)</button></div>
+      <div class="pm-row"><button id="pm-save">Save Current Slot</button></div>
+      <div class="pm-row"><button id="pm-load">Load Latest Slot</button></div>
+      <div class="pm-row"><button id="pm-export">Copy Save String</button></div>
+      <div class="pm-row"><button id="pm-import">Paste Save String</button></div>
+      <div class="pm-slots" id="pm-slots"></div>
+      <div class="pm-row"><button id="pm-quit">Quit to Title (refresh)</button></div>
+    </div>
+  </div>
 
   <div id="mobile-controls">
     <div class="mc-stick" id="mc-move"><div class="mc-nub" id="mc-move-nub"></div></div>
