@@ -8,6 +8,7 @@ import { PhysicsWorld } from './physics';
 import { Player } from './player';
 import { Character } from './character';
 import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
+import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES } from './plot';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -62,12 +63,35 @@ function renderStats() {
 }
 renderStats();
 
-if (objEl) {
-  objEl.innerHTML =
-    '<h4>SECRET OBJECTIVE</h4>' +
-    '<div class="obj-name">Oblivious</div>' +
-    '<div class="obj-text">You have no secret objective. Why do you ask?</div>';
+// === Plot: roll the night ===
+const plot = rollPlot();
+const playerId = 'player-1';
+const partyObjectives = rollObjectivesForParty([playerId]);
+const myObjective = partyObjectives[0];
+const summary = summarizeForPlayer(plot, myObjective.objective);
+
+function renderObjectiveCard() {
+  if (!objEl) return;
+  const obj = summary.myObjective;
+  let html = `<h4>SECRET OBJECTIVE</h4>` +
+    `<div class="obj-name">${obj.name}</div>` +
+    `<div class="obj-text">${obj.description}</div>`;
+  if (summary.leakedBoss) {
+    html += `<div style="margin-top:6px;color:#fa6;border-top:1px solid #553;padding-top:4px"><b>You know:</b> ${summary.leakedBoss.name}</div>`;
+  }
+  if (summary.leakedAssassin) {
+    html += `<div style="margin-top:6px;color:#fa6;border-top:1px solid #553;padding-top:4px"><b>You know:</b> ${summary.leakedAssassin.name}</div>`;
+  }
+  objEl.innerHTML = html;
 }
+renderObjectiveCard();
+console.log('[Long Watch] Plot rolled:', {
+  bossRoll: plot.bossRoll, boss: plot.boss,
+  assassinRoll: plot.assassinRoll, assassin: plot.assassin,
+  twistRolls: plot.twistRolls, twists: plot.twists,
+  arrivalMinute: plot.assassinArrivalMinute,
+  myObjective: myObjective.objective,
+});
 
 // === Game clock placeholder ===
 let started = false;
@@ -103,7 +127,7 @@ window.addEventListener('resize', () => {
 });
 
 // Expose for debugging
-(window as any).__debug = { world, physics, mansion, player, character };
+(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary };
 
 let prevTime = performance.now();
 function animate() {
