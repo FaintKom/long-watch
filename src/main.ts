@@ -26,6 +26,10 @@ import { Memory, formatMemoryForPrompt } from './memory';
 import { ConsequenceStore, formatFlagsForPrompt } from './consequences';
 import { buildCatacombs, Catacombs } from './catacombs';
 import { computeWitnesses, diffuseRumors } from './witnesses';
+import { unlockAudio, play as playSfx } from './audio';
+import { getSeed } from './rng';
+import { startGameActor } from './gameState';
+import { maybeJoinRoom, Multiplayer } from './multiplayer';
 import { isVisibleOnFloor } from './fov';
 import { setNavWorld } from './nav';
 import * as CANNON from 'cannon-es';
@@ -395,6 +399,7 @@ function renderObjectiveCard() {
   if (summary.leakedAssassin) {
     html += `<div style="margin-top:6px;color:#fa6;border-top:1px solid #553;padding-top:4px"><b>You know:</b> ${summary.leakedAssassin.name}</div>`;
   }
+  html += `<div style="margin-top:8px;color:#666;font-size:10px">seed: ${getSeed()}</div>`;
   objEl.innerHTML = html;
 }
 renderObjectiveCard();
@@ -422,6 +427,10 @@ let assassinGroup: SpawnedAssassinGroup | null = null;
 const combatLog: string[] = [];
 const memory = new Memory();
 const consequences = new ConsequenceStore();
+const gameActor = startGameActor((snap) => console.log('[gameState]', snap.value));
+// Opt-in P2P via ?room=NAME URL param. Null when single-player.
+const mp: Multiplayer | null = maybeJoinRoom(scene);
+if (mp) mp.onChat((peerId, text) => logCombat(`[peer ${peerId.slice(0, 4)}] ${text}`));
 /** Backwards-compat alias for code that still reads the raw feed (e.g. save/load). */
 const worldFeed: WorldFeed = memory.feed;
 /** Log to UI combat log AND chronicle to long-term memory (public visibility). For targeted events use memory.addEvent with a CastId[] visibility. */
@@ -439,6 +448,7 @@ gameClock.onTick = (e) => {
     logCombat('A chill runs through the manor. Something draws near.');
     consequences.set('assassin_arrival_imminent', true, gameClock.state.currentMinute);
     dispatchOffscreenBeat('warning');
+    gameActor.send({ type: 'WARNING' });
   }
   if (e.triggerAssassin) {
     assassinGroup = spawnAssassin(plot.assassin, scene, physics, mansion);
@@ -448,10 +458,14 @@ gameClock.onTick = (e) => {
     consequences.set('assassin_kind', plot.assassin, gameClock.state.currentMinute);
     renderObjectiveCard();
     dispatchOffscreenBeat('assassin_arrived');
+    playSfx('door_burst');
+    gameActor.send({ type: 'ASSASSIN_ARRIVED' });
   }
   if (e.triggerDawn) {
     logCombat('Dawn breaks. The Heir survives.');
     consequences.set('dawn_reached', true, gameClock.state.currentMinute);
+    playSfx('dawn_bell');
+    gameActor.send({ type: 'DAWN' });
     triggerEnding('heir_alive_dawn');
   }
 };
@@ -496,6 +510,7 @@ startBtn?.addEventListener('click', () => {
   renderStats();
   renderActionBar();
   started = true;
+  gameActor.send({ type: 'START' });
   startScreen!.style.display = 'none';
   renderer.domElement.requestPointerLock();
 });
@@ -674,6 +689,7 @@ function castSpellByIndex(idx: number) {
 
 renderer.domElement.addEventListener('click', () => {
   if (started && !document.pointerLockElement) renderer.domElement.requestPointerLock();
+  void unlockAudio();
 });
 
 window.addEventListener('resize', () => {
@@ -1140,6 +1156,7 @@ window.addEventListener('mousedown', (e) => {
 });
 
 function swingAt(target: Enemy) {
+  playSfx('attack_swing');
   const roll = rollDice(20);
   const total = roll + 5;
   if (roll === 1) { logCombat('You miss wildly!'); return; }
@@ -1151,8 +1168,10 @@ function swingAt(target: Enemy) {
       sneakReady = false;
     }
     target.takeHit(dmg + sneakDmg);
+    playSfx('attack_hit');
     logCombat(`You hit ${target.preset.name} for ${dmg + sneakDmg} damage${sneakDmg ? ` (incl. ${sneakDmg} sneak)` : ''}.${roll === 20 ? ' CRITICAL!' : ''}`);
     if (target.isDead) {
+      playSfx('enemy_falls');
       logCombat(`${target.preset.name} falls.`);
       target.destroy(scene, physics);
     }
@@ -1305,6 +1324,8 @@ const catacombsEnemies: Enemy[] = [];
 function enterCatacombs() {
   if (inCatacombs) return;
   inCatacombs = true;
+  gameActor.send({ type: 'CATACOMBS_ENTER' });
+  playSfx('rumble');
   logCombat('You descend through the trapdoor into damp stone.');
   // Only NPCs near the storage-room trapdoor "see" the descent.
   const trapdoorPos = { x: 44, y: 1.05, z: 27 };
@@ -1370,6 +1391,7 @@ function checkCatacombsExit() {
   if (catacombs.isOnExit(p)) {
     logCombat('You stumble out into the dockside fog. The Heir is far behind you - and so is the contract.');
     consequences.set('escaped_via_catacombs', true, gameClock.state.currentMinute);
+    gameActor.send({ type: 'CATACOMBS_EXIT' });
     triggerEnding('escaped_catacombs');
   }
 }
@@ -1577,7 +1599,8 @@ setupTouchControls();
 setTimeout(applyPendingLoad, 0);
 
 // Expose for debugging
-(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers, memory };
+(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers, memory, consequences, gameActor };
+(window as any).__gameState = gameActor;
 // Lazy expose dungen + names so console hackers can poke around without inflating cold-start.
 import('./dungenGen').then((m) => { (window as any).__dungen = m; });
 import('./names').then((m) => { (window as any).__names = m; });
@@ -1600,6 +1623,10 @@ function animate() {
   checkCatacombsExit();
   tickCatacombsEnemies(dt);
   tickRumorDiffusion(dt);
+  if (mp) {
+    const p = player.getPosition();
+    mp.pushSelfPos(p.x, p.y, p.z, player.yaw.rotation.y, character.name);
+  }
 
   // === Cast AI ===
   tickCastAi(dt);

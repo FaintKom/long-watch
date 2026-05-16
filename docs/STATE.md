@@ -52,6 +52,10 @@ Env: `.env` with `GROQ_API_KEY=...` (gitignored). Optional `GROQ_MODEL=`.
 | `catacombs.ts` | Extrudes a `DungeonGrid` into a Three.js + cannon-es sub-level positioned at `Y_OFFSET=30` (above mansion roof). InstancedMesh walls, per-cell static colliders, sparse torch lights, exit ring marker. `buildCatacombs(scene, physics, {seed})` returns `{root, spawn, exit, bodies, isOnExit, dispose}`. `main.ts` calls it when the player interacts with the trapdoor prop in the storage room. |
 | `consequences.ts` | `ConsequenceStore` flag map keyed by lowercase_snake_case strings. `set/get/has/inc/knownBy/all`. Flags wired at: warning tick, assassin arrival, dawn, first-NPC-attack, boss-proven, catacombs entry/exit, clue-pass/fail. Format via `formatFlagsForPrompt` for the Groq prompt. **Scoped flags** (e.g. `player_attacked_butler`) use a witness CastId[] so only NPCs who saw the event know it. |
 | `witnesses.ts` | `computeWitnesses(cast, {pos, world, raycast, range, coneAware, alwaysIncludes})` returns the CastId[] who actually saw an event (3D raycast + cone-of-vision + sound mode). `diffuseRumors({cast, world, raycast, pushEvent, eventsVisibleTo, currentMinute})` runs every 3 real seconds in main: two co-located NPCs share up to 2 unique recent items each direction as "[rumor from <name>] ..." entries. Player-told info also lands as `[told by player] ...` per-NPC events so retrieval picks it up later. |
+| `audio.ts` | `tone.js` synthesized SFX. `unlockAudio()` on first click (Web Audio gesture gate); `play(name)` is no-op until unlocked. Catalog: attack_swing, attack_hit, enemy_falls, door_burst, glass_shatter, chime, rumble, dawn_bell, scream, spell_cast. |
+| `rng.ts` | `seedrandom` wrapper. `getSeed()`, `setSeed(s)`, `random()`, `randInt(n)`, `roll(sides)`. Default seed: `?seed=...` URL param or timestamp fallback. plot.ts + dungenGen go through `roll(sides)` so a saved seed reproduces the entire night. Seed shown on objective card. |
+| `gameState.ts` | `xstate` machine for major phases: `intro -> exploring -> exploring_warned -> combat -> catacombs -> ending_*`. `startGameActor(onTransition)` creates and starts an actor. main.ts sends `START`, `WARNING`, `ASSASSIN_ARRIVED`, `CATACOMBS_ENTER`, `CATACOMBS_EXIT`, `DAWN`. Exposed on `window.__gameState`. |
+| `multiplayer.ts` | Trystero P2P (Nostr strategy, no signaling server). Activated via `?room=NAME` URL param. Each peer broadcasts position+yaw at 10Hz, receives others' positions, renders a "ghost" mesh with name sprite per remote peer. `mp.sendChat(text)` mirrors logCombat lines across peers. For deterministic shared plot, all peers should also pass `?seed=`. |
 
 ---
 
@@ -164,7 +168,13 @@ npm run dev             # http://localhost:3100
 - **Iter 21**: Throwables via cannon-es dynamic spheres. Removed chair-sit healing.
 - **Iter 22-30**: Full faction system, player-attacks-NPC handling, companion (Karla), reputation gates, save/load, mobile controls, Heir AI variants.
 - **Iter 31**: Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
-- **Iter 38** (current): Witness propagation. Bug fix from Iter 37 - off-screen beats and consequence flags were leaking to all NPCs regardless of line-of-sight.
+- **Iter 39** (current): Four new libs onboarded.
+  - **tone.js -> `src/audio.ts`.** Synthesized SFX (no audio files shipped). Tone unlocks on first click. Triggers at swing/hit/fall/door/rumble/dawn.
+  - **seedrandom -> `src/rng.ts`.** `?seed=` URL param yields a deterministic plot + catacombs layout. plot.ts and dungenGen route through `roll(sides)`. Seed displayed on objective card.
+  - **xstate -> `src/gameState.ts`.** Top-level FSM (`intro/exploring/exploring_warned/combat/catacombs/ending_*`). main.ts sends transitions at each milestone. Exposed via `window.__gameState`.
+  - **Trystero -> `src/multiplayer.ts`.** Opt-in P2P via `?room=NAME`. Nostr strategy = no signaling server. Ghost meshes for remote peers, 10Hz position sync, chat mirroring of logCombat.
+  - DivineVoxelEngine / noa / Python libs / Roll20 / Foundry / Unity / Godot remain rejected (stack mismatch / wrong runtime / Babylon-only).
+- **Iter 38**: Witness propagation. Bug fix from Iter 37 - off-screen beats and consequence flags were leaking to all NPCs regardless of line-of-sight.
   - `src/witnesses.ts` `computeWitnesses(cast, opts)` filters by 3D voxel raycast, range, optional cone-of-vision. `coneAware:false` for sound events (attacks). Victim always included.
   - `dispatchOffscreenBeat(label, witnessIds?)` accepts a witness list; only those NPCs are sent to `/api/npc-beat`. Default (no list) = all NPCs (for manor-wide events like warning chime / assassin entry).
   - `consequences.set(name, value, minute, knownBy)` now scopes flags by witness set: `player_attacked_<id>` only goes to actual eye/ear witnesses (always plus the victim); `theft_caught_from_<owner>` similar; `entered_catacombs` scoped to NPCs near the trapdoor.

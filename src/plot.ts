@@ -114,8 +114,10 @@ const ASSASSIN_ORDER: AssassinId[] = ['mooks', 'cult_of_umberlee', 'crimson_ange
 const TWIST_ORDER: TwistId[] = ['none', 'poisoned_heir', 'assassin_kin', 'fake_death', 'doppelganger_matriarch', 'heir_is_daughter', 'heir_is_dragon'];
 const OBJECTIVE_ORDER: ObjectiveId[] = ['oblivious', 'thief', 'saboteur', 'pacifist', 'smitten', 'seeker', 'protector', 'accomplice', 'celebrity', 'boozer', 'leader', 'traitor'];
 
+import { roll as seededRoll } from './rng';
+
 function rollD(sides: number): number {
-  return Math.floor(Math.random() * sides) + 1;
+  return seededRoll(sides);
 }
 
 export interface PlotRoll {
