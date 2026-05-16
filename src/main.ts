@@ -25,6 +25,7 @@ import { WorldFeed } from './events';
 import { Memory, formatMemoryForPrompt } from './memory';
 import { ConsequenceStore, formatFlagsForPrompt } from './consequences';
 import { buildCatacombs, Catacombs } from './catacombs';
+import { currentSpot } from './schedules';
 import { computeWitnesses, diffuseRumors } from './witnesses';
 import { unlockAudio, play as playSfx } from './audio';
 import { resolveAttack, applyCombatFrame } from './combat';
@@ -267,6 +268,24 @@ function tickCastAi(dt: number) {
       d20: () => rollDice(20),
       rollDice: (formula: string) => Math.max(0, rollFormula(formula)),
     });
+
+    // Schedule drift: if NPC is idle (no combat / no alarm) and the scheduled
+    // spot is far, walk toward it. Uses the nav system on entity side via
+    // direct velocity override (cast.updateAi sets zero in idle).
+    if (cm.aiState === 'idle') {
+      const spot = currentSpot(cm.def.id, gameClock.state.currentMinute);
+      if (spot) {
+        const dx = spot.x - cm.body.position.x;
+        const dz = spot.z - cm.body.position.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d > 1.5) {
+          const v = cm.def.combatStats.speed * 0.25;
+          cm.body.velocity.x = (dx / d) * v;
+          cm.body.velocity.z = (dz / d) * v;
+          cm.group.rotation.y = Math.atan2(dx, dz);
+        }
+      }
+    }
   }
 
   // Death check on player
@@ -450,6 +469,7 @@ gameClock.onTick = (e) => {
     consequences.set('assassin_arrival_imminent', true, gameClock.state.currentMinute);
     dispatchOffscreenBeat('warning');
     gameActor.send({ type: 'WARNING' });
+    autoSave('warning');
   }
   if (e.triggerAssassin) {
     assassinGroup = spawnAssassin(plot.assassin, scene, physics, mansion);
@@ -461,6 +481,7 @@ gameClock.onTick = (e) => {
     dispatchOffscreenBeat('assassin_arrived');
     playSfx('door_burst');
     gameActor.send({ type: 'ASSASSIN_ARRIVED' });
+    autoSave('assassin_arrived');
   }
   if (e.triggerDawn) {
     logCombat('Dawn breaks. The Heir survives.');
@@ -871,6 +892,8 @@ async function streamReply(message: string) {
     const flagsBlock = formatFlagsForPrompt(flagsKnown);
     // Kick a reflection if this NPC has accumulated enough new events. Fire-and-forget.
     memory.maybeReflect(cm.def.id, cm.def.displayName, cm.def.persona.persona, currentMinute);
+    // Consolidate older reflections into a summary when the list grows. Fire-and-forget.
+    memory.maybeConsolidate(cm.def.id, cm.def.displayName, cm.def.persona.persona, currentMinute);
 
     const resp = await fetch('/api/npc-chat', {
       method: 'POST',
@@ -1328,6 +1351,7 @@ function enterCatacombs() {
   if (inCatacombs) return;
   inCatacombs = true;
   gameActor.send({ type: 'CATACOMBS_ENTER' });
+  autoSave('catacombs_enter');
   playSfx('rumble');
   logCombat('You descend through the trapdoor into damp stone.');
   // Only NPCs near the storage-room trapdoor "see" the descent.
@@ -1518,6 +1542,16 @@ function listSaveSlots(): { slot: number; exists: boolean; minute?: number; chos
 
 /** activeSaveSlot: 0..MAX_SLOTS-1. Defaults to 0; pause menu lets user pick. */
 let activeSaveSlot = 0;
+
+/** Auto-save on milestone events. Always writes to the reserved last slot. */
+function autoSave(_label: string): void {
+  if (!started || endingShown) return;
+  try {
+    saveGame(MAX_SLOTS - 1);
+  } catch {
+    /* best-effort, silent */
+  }
+}
 
 function saveGame(slot: number = activeSaveSlot) {
   if (!started) return;

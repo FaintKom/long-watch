@@ -63,7 +63,12 @@ export class Memory {
   reflectionThreshold = 8;
   /** Max reflections kept per NPC (oldest dropped). */
   maxReflectionsPerNpc = 20;
+  /** Threshold to fire a consolidation pass (collapse oldest N into 1 summary). */
+  consolidateThreshold = 15;
+  /** How many oldest reflections to merge per consolidate run. */
+  consolidateBatchSize = 10;
   private reflecting: Set<CastId> = new Set();
+  private consolidating: Set<CastId> = new Set();
 
   constructor(feed?: WorldFeed) {
     this.feed = feed ?? new WorldFeed();
@@ -177,7 +182,59 @@ export class Memory {
     this.reflections.clear();
     this.unreflectedCount.clear();
     this.reflecting.clear();
+    this.consolidating.clear();
     this.nextReflectionId = 1;
+  }
+
+  /**
+   * If an NPC has accumulated > `consolidateThreshold` reflections, kick a
+   * Groq call to summarise the oldest `consolidateBatchSize` of them into a
+   * single first-person bullet, then replace them with the consolidated entry.
+   * Fire-and-forget. Returns true if a request was actually fired.
+   */
+  maybeConsolidate(
+    npcId: CastId,
+    displayName: string,
+    personaSnippet: string,
+    currentMinute: number,
+    opts: { endpoint?: string } = {},
+  ): boolean {
+    const list = this.reflections.get(npcId) ?? [];
+    if (list.length <= this.consolidateThreshold) return false;
+    if (this.consolidating.has(npcId)) return false;
+    const batch = list.slice(0, this.consolidateBatchSize);
+    if (batch.length === 0) return false;
+    this.consolidating.add(npcId);
+
+    const endpoint = opts.endpoint ?? '/api/npc-reflect';
+    const fakeEvents = batch.map((r) => ({ minute: r.atMinute, text: r.text }));
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName,
+        personaSnippet: `${personaSnippet}\n\nYou are summarising your own older thoughts into ONE consolidated reflection.`,
+        events: fakeEvents,
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`consolidate ${r.status}`);
+        const data = (await r.json()) as { reflections?: string[] };
+        const merged = (data.reflections ?? []).join(' ').trim().slice(0, 320);
+        if (merged.length > 0) {
+          // Drop the consolidated batch from the front and prepend the merged one.
+          const remaining = list.slice(this.consolidateBatchSize);
+          remaining.unshift({
+            id: this.nextReflectionId++, npcId, atMinute: currentMinute,
+            text: `(consolidated) ${merged}`,
+            importance: 1.6,
+          });
+          this.reflections.set(npcId, remaining);
+        }
+      })
+      .catch((e) => console.warn('[memory] consolidate failed for', npcId, e))
+      .finally(() => { this.consolidating.delete(npcId); });
+    return true;
   }
 }
 
