@@ -28,6 +28,7 @@ import { buildCatacombs, Catacombs } from './catacombs';
 import { currentSpot } from './schedules';
 import { computeWitnesses, diffuseRumors } from './witnesses';
 import { unlockAudio, play as playSfx, setAmbient } from './audio';
+import { startMusic, setPhase as setMusicPhase } from './music';
 import { spawnBurst, tickParticles, bindParticleScene } from './particles';
 import { attachFpHands, swingAnim, tickFpHands } from './fpHands';
 import { resolveAttack, applyCombatFrame } from './combat';
@@ -605,6 +606,7 @@ gameClock.onTick = (e) => {
     dispatchOffscreenBeat('assassin_arrived');
     playSfx('door_burst');
     setAmbient('combat');
+    setMusicPhase('combat');
     gameActor.send({ type: 'ASSASSIN_ARRIVED' });
     autoSave('assassin_arrived');
   }
@@ -612,6 +614,7 @@ gameClock.onTick = (e) => {
     logCombat('Dawn breaks. The Heir survives.');
     consequences.set('dawn_reached', true, gameClock.state.currentMinute);
     playSfx('dawn_bell');
+    setMusicPhase('off');
     gameActor.send({ type: 'DAWN' });
     triggerEnding('heir_alive_dawn');
   }
@@ -846,6 +849,7 @@ function castSpellByIndex(idx: number) {
 renderer.domElement.addEventListener('click', () => {
   if (started && !document.pointerLockElement) renderer.domElement.requestPointerLock();
   void unlockAudio();
+  void startMusic();
 });
 
 window.addEventListener('resize', () => {
@@ -1579,6 +1583,7 @@ function enterCatacombs() {
   autoSave('catacombs_enter');
   playSfx('rumble');
   setAmbient('catacombs');
+  setMusicPhase('catacombs');
   logCombat('You descend through the trapdoor into damp stone.');
   // Only NPCs near the storage-room trapdoor "see" the descent.
   const trapdoorPos = { x: 44, y: 1.05, z: 27 };
