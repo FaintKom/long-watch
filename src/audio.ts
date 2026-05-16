@@ -18,20 +18,25 @@
  *   - 'scream'          NPC alarm
  *   - 'spell_cast'      magic launch
  */
-import * as Tone from 'tone';
+// Iter 53: tone.js is loaded lazily on first unlockAudio() call so the initial
+// JS bundle is ~250 KB lighter for players who never interact with audio.
+// Types are loose-typed (any) because we cannot statically import Tone in
+// declarations without pulling it into the cold-start bundle.
+type ToneModule = typeof import('tone');
+let Tone: ToneModule | null = null;
 
 let unlocked = false;
-let limiter: Tone.Limiter | null = null;
-let metalSynth: Tone.MetalSynth | null = null;
-let membraneSynth: Tone.MembraneSynth | null = null;
-let noiseSynth: Tone.NoiseSynth | null = null;
-let pluckSynth: Tone.PluckSynth | null = null;
-let pmSynth: Tone.PolySynth | null = null;
+let limiter: any = null;
+let metalSynth: any = null;
+let membraneSynth: any = null;
+let noiseSynth: any = null;
+let pluckSynth: any = null;
+let pmSynth: any = null;
 
 // --- Ambient loops (Iter 46) ---
-let ambientNoise: Tone.Noise | null = null;
-let ambientFilter: Tone.Filter | null = null;
-let ambientGain: Tone.Gain | null = null;
+let ambientNoise: any = null;
+let ambientFilter: any = null;
+let ambientGain: any = null;
 let currentAmbient: AmbientName | 'off' = 'off';
 
 export type AmbientName = 'study' | 'kitchen' | 'courtyard' | 'cellar' | 'combat' | 'catacombs' | 'off';
@@ -39,23 +44,23 @@ export type AmbientName = 'study' | 'kitchen' | 'courtyard' | 'cellar' | 'combat
 export async function unlockAudio(): Promise<void> {
   if (unlocked) return;
   try {
+    Tone = await import('tone');
     await Tone.start();
   } catch {
     return;
   }
   unlocked = true;
-  limiter = new Tone.Limiter(-6).toDestination();
-  metalSynth = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.2, release: 0.1 } }).connect(limiter);
-  membraneSynth = new Tone.MembraneSynth({ octaves: 4, pitchDecay: 0.05 }).connect(limiter);
-  noiseSynth = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.005, decay: 0.15, sustain: 0 } }).connect(limiter);
-  pluckSynth = new Tone.PluckSynth({ attackNoise: 0.5, dampening: 4000, resonance: 0.7 }).connect(limiter);
-  pmSynth = new Tone.PolySynth(Tone.FMSynth).connect(limiter);
+  const T: any = Tone;
+  limiter = new T.Limiter(-6).toDestination();
+  metalSynth = new T.MetalSynth({ envelope: { attack: 0.001, decay: 0.2, release: 0.1 } }).connect(limiter);
+  membraneSynth = new T.MembraneSynth({ octaves: 4, pitchDecay: 0.05 }).connect(limiter);
+  noiseSynth = new T.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.005, decay: 0.15, sustain: 0 } }).connect(limiter);
+  pluckSynth = new T.PluckSynth({ attackNoise: 0.5, dampening: 4000, resonance: 0.7 }).connect(limiter);
+  pmSynth = new T.PolySynth(T.FMSynth).connect(limiter);
 
-  // Ambient chain: continuous Tone.Noise -> filter -> gain. Filter cutoff and
-  // gain are swapped per location to produce wind/fire/sea/echo flavours.
-  ambientGain = new Tone.Gain(0).connect(limiter);
-  ambientFilter = new Tone.Filter({ frequency: 600, type: 'lowpass', rolloff: -12 }).connect(ambientGain);
-  ambientNoise = new Tone.Noise({ type: 'brown' }).connect(ambientFilter);
+  ambientGain = new T.Gain(0).connect(limiter);
+  ambientFilter = new T.Filter({ frequency: 600, type: 'lowpass', rolloff: -12 }).connect(ambientGain);
+  ambientNoise = new T.Noise({ type: 'brown' }).connect(ambientFilter);
   ambientNoise.start();
 }
 
@@ -64,7 +69,7 @@ export async function unlockAudio(): Promise<void> {
  * Called from main.ts when player crosses rooms or phase changes.
  */
 export function setAmbient(name: AmbientName): void {
-  if (!unlocked || !ambientFilter || !ambientGain || !ambientNoise) return;
+  if (!unlocked || !ambientFilter || !ambientGain || !ambientNoise || !Tone) return;
   if (currentAmbient === name) return;
   currentAmbient = name;
   const now = Tone.now();
@@ -90,7 +95,7 @@ export type SfxName =
   | 'rumble' | 'dawn_bell' | 'scream' | 'spell_cast';
 
 export function play(name: SfxName): void {
-  if (!unlocked) return;
+  if (!unlocked || !Tone) return;
   const now = Tone.now();
   try {
     switch (name) {

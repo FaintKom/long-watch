@@ -2126,8 +2126,22 @@ import * as __names from './names';
 (window as any).__names = __names;
 
 let prevTime = performance.now();
+let animateErrorCount = 0;
 function animate() {
   requestAnimationFrame(animate);
+  try {
+    animateInner();
+  } catch (err) {
+    animateErrorCount++;
+    if (animateErrorCount <= 3) {
+      console.error('[animate] error', err);
+      logCombat('Internal error (logged). Continuing.');
+    }
+    // After 3 errors, suppress logs to avoid log spam, but keep rendering.
+  }
+}
+
+function animateInner() {
   const now = performance.now();
   const dt = Math.min((now - prevTime) / 1000, 0.05);
   prevTime = now;
