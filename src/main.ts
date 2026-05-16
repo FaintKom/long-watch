@@ -36,7 +36,7 @@ import { getSeed, setSeed } from './rng';
 import { startGameActor } from './gameState';
 import { maybeJoinRoom, Multiplayer } from './multiplayer';
 import { isVisibleOnFloor } from './fov';
-import { setNavWorld } from './nav';
+import { setNavWorld, registerPortal, clearPortals } from './nav';
 import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
@@ -105,6 +105,12 @@ const mansion = buildMansion(world, physics, scene);
 scene.add(world.group);
 // Register the world for NPC A* navigation (cast.ts / enemy.ts / companion.ts).
 setNavWorld(world);
+
+// Iter 59: register stair portals so cross-floor pathing routes via stairs.
+// Mansion has two staircases - hardcoded from buildMansion geometry.
+clearPortals();
+registerPortal({ x: 17.5, y: 1.5, z: 11.5 }, { x: 17.5, y: 6.5, z: 7.5 });   // East stair
+registerPortal({ x: 40.5, y: 1.5, z: 24.5 }, { x: 40.5, y: 6.5, z: 27.5 });  // West stair
 
 // === Player ===
 const player = new Player(camera, physics, world);

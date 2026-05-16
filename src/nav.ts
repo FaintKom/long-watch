@@ -10,8 +10,11 @@
  * Returns a unit-length (dx, dz) steering vector pointing at the next waypoint,
  * or `null` if no path was found (caller should fall back to straight-line or idle).
  *
- * Single-floor only. If target is on a different floor (|dy| > 2), the caller should
- * use straight-line steering - multi-floor pathing (stairs) is out of scope for Iter 33.
+ * Iter 59: multi-floor routing via registered stair portals. When the target is
+ * on a different floor than the entity, steerToward picks the nearest portal
+ * endpoint on the entity's own floor and routes there. Once the entity climbs
+ * the stairs (physics-driven), the next tick sees the new floor Y and replans
+ * directly to the real target.
  */
 import { Path } from 'rot-js';
 
@@ -26,6 +29,32 @@ export interface NavWorld {
 let _navWorld: NavWorld | null = null;
 export function setNavWorld(w: NavWorld): void { _navWorld = w; }
 export function hasNavWorld(): boolean { return _navWorld !== null; }
+
+/** Stair portal pairs. Each portal links a low Y endpoint to a high Y endpoint. */
+const _portals: { low: Vec3; high: Vec3 }[] = [];
+export function registerPortal(low: Vec3, high: Vec3): void {
+  _portals.push({ low: { ...low }, high: { ...high } });
+}
+export function clearPortals(): void { _portals.length = 0; }
+export function portalCount(): number { return _portals.length; }
+
+/** For a given entity Y, return the endpoint on the same floor + opposite endpoint. */
+function nearestPortal(my: Vec3): { mine: Vec3; far: Vec3 } | null {
+  if (_portals.length === 0) return null;
+  let best: { mine: Vec3; far: Vec3; d: number } | null = null;
+  for (const p of _portals) {
+    const lowDy = Math.abs(my.y - p.low.y);
+    const highDy = Math.abs(my.y - p.high.y);
+    const onLow = lowDy <= highDy;
+    const mine = onLow ? p.low : p.high;
+    const far = onLow ? p.high : p.low;
+    const dx = mine.x - my.x;
+    const dz = mine.z - my.z;
+    const d = dx * dx + dz * dz;
+    if (!best || d < best.d) best = { mine, far, d };
+  }
+  return best ? { mine: best.mine, far: best.far } : null;
+}
 
 export interface Vec3 { x: number; y: number; z: number }
 
@@ -61,13 +90,19 @@ export class Navigator {
     const world = this.resolveWorld();
     if (!world) return null;
     const fy = Math.floor(floorY ?? my.y);
-    // Different floors: caller should fall back to straight-line.
-    if (Math.abs(target.y - my.y) > 2) return null;
+
+    // Cross-floor: route via nearest portal endpoint on entity's floor.
+    let effectiveTarget = target;
+    if (Math.abs(target.y - my.y) > 2) {
+      const portal = nearestPortal(my);
+      if (!portal) return null; // no portal registered, caller falls back
+      effectiveTarget = portal.mine;
+    }
 
     const mx = Math.floor(my.x);
     const mz = Math.floor(my.z);
-    const tx = Math.floor(target.x);
-    const tz = Math.floor(target.z);
+    const tx = Math.floor(effectiveTarget.x);
+    const tz = Math.floor(effectiveTarget.z);
 
     if (mx === tx && mz === tz) return { dx: 0, dz: 0 };
 
