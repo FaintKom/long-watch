@@ -480,7 +480,9 @@ renderStats();
 const plot = rollPlot();
 applyPlotContext(CAST, plot.twists, plot.boss); // mutate cast personas based on rolled plot
 const playerId = 'player-1';
-const partyObjectives = rollObjectivesForParty([playerId]);
+// Multiplayer: roll a 4-player party objective list so visiting peers each get
+// a distinct objective. Single-player: only ours is rendered.
+const partyObjectives = rollObjectivesForParty(['p1', 'p2', 'p3', 'p4']);
 const myObjective = partyObjectives[0];
 const summary = summarizeForPlayer(plot, myObjective.objective);
 
@@ -495,6 +497,15 @@ function renderObjectiveCard() {
   }
   if (summary.leakedAssassin) {
     html += `<div style="margin-top:6px;color:#fa6;border-top:1px solid #553;padding-top:4px"><b>You know:</b> ${summary.leakedAssassin.name}</div>`;
+  }
+  // Multiplayer flavor: show other party members' objectives (faceup) when in a room.
+  if (mp && partyObjectives.length > 1) {
+    html += `<div style="margin-top:8px;color:#888;font-size:11px;border-top:1px solid #443;padding-top:4px"><b>Party (this room):</b></div>`;
+    for (let i = 1; i < partyObjectives.length; i++) {
+      const o = OBJECTIVES[partyObjectives[i].objective];
+      if (!o) continue;
+      html += `<div style="color:#888;font-size:11px">- ${o.name}: ${o.description}</div>`;
+    }
   }
   html += `<div style="margin-top:8px;color:#666;font-size:10px">seed: ${getSeed()}</div>`;
   objEl.innerHTML = html;
