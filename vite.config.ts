@@ -369,5 +369,27 @@ export default defineConfig(({ mode }) => {
     publicDir: 'public',
     server: { port: 3100 },
     plugins: [npcChatPlugin(env), npcReflectPlugin(env), npcBeatPlugin(env)],
+    build: {
+      // Iter 40: split heavy libs into separate chunks so the initial JS
+      // payload only pulls what the boot path needs. Lazy game features
+      // (audio, multiplayer, dungeon gen) sit in their own chunks.
+      chunkSizeWarningLimit: 800,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            three:        ['three'],
+            physics:      ['cannon-es'],
+            audio:        ['tone'],
+            multiplayer:  ['trystero'],
+            voxloader:    ['threejs-vox-loader'],
+            roguelike:    ['rot-js', 'labyrinthos'],
+            statemachine: ['xstate'],
+            rng:          ['seedrandom'],
+            dice:         ['dice-typescript'],
+            names:        ['fantastical'],
+          },
+        },
+      },
+    },
   };
 });

@@ -2,9 +2,12 @@
 /**
  * Procedural MagicaVoxel (.vox) generator for Long Watch NPCs and enemies.
  *
- * v2 (Iter 36): taller Minecraft-proportion humanoids (8x4x32) with
- * character-specific accessories driven by `traits` (cape, scarf, hat,
- * apron, sabres, robe, etc). Each entry maps to a distinct silhouette.
+ * v3 (Iter 40): adds per-character `customBuild()` callbacks for the named
+ * cast + Karla. Each custom function paints distinctive features beyond the
+ * generic trait set: Magrath gets a draped crimson half-cape and crossed
+ * sabres, Mira gets a wider waist + flour-dusted apron stripes, Aldous gets
+ * a pencil silhouette with a pocket-watch chain, Karla a shoulder pad, etc.
+ * Enemies stay on the generic template.
  *
  * Format reference: https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt
  *
@@ -275,6 +278,80 @@ function addAccessories(voxels, anchors, profile) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-character custom builders (v3). Called after buildBase + addAccessories.
+// Add or override voxels for unique silhouette features.
+// ---------------------------------------------------------------------------
+
+const CUSTOM_BUILDS = {
+  magrath: (voxels, a) => {
+    // Lengthen the cape to mid-thigh + crossed sabres at hip.
+    fillBox(voxels, a.cx - 3, a.cy + 1, 3, a.cx + 2, a.cy + 1, a.torsoBottom - 1, SLOT.accent);
+    // Crossed sabres on hip
+    fillBox(voxels, a.cx + a.shoulder + 1, a.cy + 1, a.legTop, a.cx + a.shoulder + 1, a.cy + 1, a.legTop + 5, SLOT.metal);
+    fillBox(voxels, a.cx - a.shoulder - 2, a.cy + 1, a.legTop, a.cx - a.shoulder - 2, a.cy + 1, a.legTop + 5, SLOT.metal);
+    // High collar
+    fillBox(voxels, a.cx - 1, a.cy - 2, a.neckZ, a.cx, a.cy + 1, a.neckZ, SLOT.body);
+  },
+
+  wallace: (voxels, a) => {
+    // Slight stoop: drop the head one voxel.
+    // Add a slim cravat band already done; here we add ink-stained fingertips.
+    place(voxels, a.cx - a.shoulder - 1, a.cy - 1, a.torsoBottom, SLOT.accent);
+    place(voxels, a.cx + a.shoulder,     a.cy - 1, a.torsoBottom, SLOT.accent);
+    // Ribbon on hair
+    place(voxels, a.cx - 2, a.cy - 1, a.headTop + 1, SLOT.accent);
+  },
+
+  right_hand: (voxels, a) => {
+    // Red scarf already in trait set; add a satchel slung across chest.
+    fillBox(voxels, a.cx - a.shoulder - 1, a.cy - 1, a.torsoBottom + 2, a.cx + a.shoulder, a.cy - 1, a.torsoBottom + 2, SLOT.accent);
+    // Extra dagger sheathed at small of back
+    fillBox(voxels, a.cx - 1, a.cy + 1, a.torsoBottom + 1, a.cx, a.cy + 1, a.torsoBottom + 4, SLOT.metal);
+  },
+
+  mira: (voxels, a) => {
+    // Wider hips. Add side panels.
+    fillBox(voxels, a.cx - a.shoulder - 1, a.cy - 1, a.legTop + 1, a.cx - a.shoulder - 1, a.cy, a.torsoBottom + 1, SLOT.body);
+    fillBox(voxels, a.cx + a.shoulder,     a.cy - 1, a.legTop + 1, a.cx + a.shoulder,     a.cy, a.torsoBottom + 1, SLOT.body);
+    // Apron stripe in flour-white
+    for (let z = a.torsoBottom + 1; z <= a.torsoTop - 1; z += 2) {
+      place(voxels, a.cx, a.cy - 2, z, SLOT.accent);
+    }
+    // Iron skillet in right hand
+    fillBox(voxels, a.cx + a.shoulder + 1, a.cy - 1, a.torsoBottom - 1, a.cx + a.shoulder + 2, a.cy, a.torsoBottom + 1, SLOT.metal);
+  },
+
+  aldous: (voxels, a) => {
+    // Pocket-watch chain across waistcoat.
+    fillBox(voxels, a.cx - 2, a.cy - 2, a.torsoBottom + 2, a.cx + 1, a.cy - 2, a.torsoBottom + 2, SLOT.accent);
+    place(voxels, a.cx + 1, a.cy - 2, a.torsoBottom + 1, SLOT.metal); // fob
+    // Stand-up collar
+    fillBox(voxels, a.cx - 1, a.cy - 2, a.neckZ, a.cx, a.cy - 2, a.neckZ + 1, SLOT.body);
+  },
+
+  penny: (voxels, a) => {
+    // Skirt flare.
+    fillBox(voxels, a.cx - 3, a.cy - 1, a.legTop - 1, a.cx + 2, a.cy, a.legTop, SLOT.body);
+    // Maid cap ribbon already added; add inkstain finger detail.
+    place(voxels, a.cx + a.shoulder, a.cy - 1, a.torsoBottom, SLOT.accent);
+  },
+
+  old_tom: (voxels, a) => {
+    // Coil of rope at belt.
+    fillBox(voxels, a.cx + a.shoulder, a.cy - 1, a.legTop, a.cx + a.shoulder, a.cy, a.legTop + 1, SLOT.wood);
+    // Bandana strip below the hat
+    fillBox(voxels, a.cx - 2, a.cy - 2, a.headTop - 1, a.cx + 1, a.cy + 1, a.headTop - 1, SLOT.accent);
+  },
+
+  karla: (voxels, a) => {
+    // Shoulder pad on right
+    fillBox(voxels, a.cx + a.shoulder - 1, a.cy - 1, a.torsoTop, a.cx + a.shoulder, a.cy, a.torsoTop + 1, SLOT.accent);
+    // Strap across chest
+    fillBox(voxels, a.cx - a.shoulder, a.cy - 1, a.torsoBottom + 3, a.cx + a.shoulder - 1, a.cy - 1, a.torsoBottom + 3, SLOT.accent);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // MagicaVoxel .vox binary writer (unchanged)
 // ---------------------------------------------------------------------------
 
@@ -363,10 +440,12 @@ let count = 0;
 for (const profile of CHARACTERS) {
   const { voxels, anchors } = buildBase(profile);
   addAccessories(voxels, anchors, profile);
+  const custom = CUSTOM_BUILDS[profile.key];
+  if (custom) custom(voxels, anchors, profile);
   const palette = buildPalette(profile);
   const outPath = path.join(OUT_DIR, `${profile.key}.vox`);
   const n = writeVox(outPath, voxels, palette, { x: GRID_X, y: GRID_Y, z: GRID_Z });
   count++;
-  console.log(`wrote ${outPath} (${n} unique voxels)`);
+  console.log(`wrote ${outPath} (${n} unique voxels)${custom ? ' [custom]' : ''}`);
 }
 console.log(`\nDone. ${count} models in ${OUT_DIR}`);

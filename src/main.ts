@@ -27,7 +27,8 @@ import { ConsequenceStore, formatFlagsForPrompt } from './consequences';
 import { buildCatacombs, Catacombs } from './catacombs';
 import { computeWitnesses, diffuseRumors } from './witnesses';
 import { unlockAudio, play as playSfx } from './audio';
-import { getSeed } from './rng';
+import { resolveAttack, applyCombatFrame } from './combat';
+import { getSeed, setSeed } from './rng';
 import { startGameActor } from './gameState';
 import { maybeJoinRoom, Multiplayer } from './multiplayer';
 import { isVisibleOnFloor } from './fov';
@@ -1156,30 +1157,27 @@ window.addEventListener('mousedown', (e) => {
 });
 
 function swingAt(target: Enemy) {
-  playSfx('attack_swing');
-  const roll = rollDice(20);
-  const total = roll + 5;
-  if (roll === 1) { logCombat('You miss wildly!'); return; }
-  if (roll === 20 || total >= target.preset.ac) {
-    let dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3;
-    let sneakDmg = 0;
-    if (chosenClass === 'rogue' && sneakReady) {
-      sneakDmg = sneakAttackDamage(character);
-      sneakReady = false;
-    }
-    target.takeHit(dmg + sneakDmg);
-    playSfx('attack_hit');
-    logCombat(`You hit ${target.preset.name} for ${dmg + sneakDmg} damage${sneakDmg ? ` (incl. ${sneakDmg} sneak)` : ''}.${roll === 20 ? ' CRITICAL!' : ''}`);
-    if (target.isDead) {
-      playSfx('enemy_falls');
-      logCombat(`${target.preset.name} falls.`);
-      target.destroy(scene, physics);
-    }
-    if (assassinGroup && assassinGroup.enemies.every(e => e.isDead)) {
-      triggerEnding('assassin_defeated');
-    }
-  } else {
-    logCombat(`Your strike glances off ${target.preset.name}.`);
+  let sneakDmg = 0;
+  if (chosenClass === 'rogue' && sneakReady) {
+    sneakDmg = sneakAttackDamage(character);
+    sneakReady = false;
+  }
+  const frame = resolveAttack(
+    { name: 'You', attackBonus: 5, damageDice: '1d8+3', damageWord: 'steel' },
+    { name: target.preset.name, ac: target.preset.ac, hp: target.character.hp, maxHp: target.character.maxHp },
+    { bonusDamage: sneakDmg, fumbleLine: 'You miss wildly!' },
+  );
+  applyCombatFrame(frame, {
+    takeHit: (dmg) => target.takeHit(dmg),
+    log: logCombat,
+    playSfx,
+    onLethal: () => { target.destroy(scene, physics); },
+    onResolved: (f) => {
+      if (sneakDmg > 0 && f.hit) logCombat(`(...includes ${sneakDmg} sneak attack damage.)`);
+    },
+  });
+  if (assassinGroup && assassinGroup.enemies.every(e => e.isDead)) {
+    triggerEnding('assassin_defeated');
   }
 }
 
@@ -1342,20 +1340,75 @@ function enterCatacombs() {
   player.yaw.position.set(catacombs.spawn.x, catacombs.spawn.y, catacombs.spawn.z);
 
   // Hostile encounter: if the assassin has already breached the mansion,
-  // a rear-guard ambush waits in the catacombs.
+  // a rear-guard waits inside. Three staged waves at distance fractions 0.3 /
+  // 0.65 / 0.9 of the spawn->exit Manhattan path. Each wave is small (1-2
+  // enemies) so combat stays fast.
   if (consequences.has('assassin_arrived')) {
-    const points = catacombs.pickEnemySpawnPoints(3);
-    // Pick enemy kind by assassin id: mook ambush for human assassins, fanatics for cults.
     const ambushKind: EnemyKind = plot.assassin === 'cult_of_umberlee' ? 'fanatic' : 'mook';
-    for (const p of points) {
-      const e = new Enemy(ambushKind, p.x, p.y, p.z, scene, physics);
+    schedulePendingWaves(ambushKind);
+  }
+}
+
+interface PendingWave {
+  frac: number;
+  size: number;
+  spawned: boolean;
+}
+let pendingWaves: PendingWave[] = [];
+let waveKind: EnemyKind = 'mook';
+
+function schedulePendingWaves(kind: EnemyKind) {
+  waveKind = kind;
+  pendingWaves = [
+    { frac: 0.30, size: 1, spawned: false },
+    { frac: 0.65, size: 2, spawned: false },
+    { frac: 0.90, size: 2, spawned: false },
+  ];
+  consequences.set('catacombs_ambush', true, gameClock.state.currentMinute);
+  logCombat('You sense movement deeper in the dark.');
+  gameClock.enterCombat();
+}
+
+function tickCatacombsWaves() {
+  if (!inCatacombs || !catacombs) return;
+  if (pendingWaves.length === 0) return;
+  const p = player.getPosition();
+  for (const wave of pendingWaves) {
+    if (wave.spawned) continue;
+    const wavePts = catacombs.pickWavePoints(wave.frac, wave.size);
+    if (wavePts.length === 0) { wave.spawned = true; continue; }
+    // Trigger when player is within 6 world units of any of the wave's tiles.
+    let triggered = false;
+    for (const wp of wavePts) {
+      const dx = p.x - wp.x; const dz = p.z - wp.z;
+      if (Math.abs(p.y - wp.y) < 3 && Math.sqrt(dx * dx + dz * dz) < 6) { triggered = true; break; }
+    }
+    if (!triggered) continue;
+    wave.spawned = true;
+    for (const wp of wavePts) {
+      const e = new Enemy(waveKind, wp.x, wp.y, wp.z, scene, physics);
       e.faction = ASSASSIN_FACTION[plot.assassin];
       catacombsEnemies.push(e);
     }
-    if (points.length > 0) {
-      logCombat(`A rear-guard waits in the dark - ${points.length} ${ambushKind === 'fanatic' ? 'fanatics' : 'mooks'} step from the shadows.`);
-      consequences.set('catacombs_ambush', true, gameClock.state.currentMinute);
-      gameClock.enterCombat();
+    logCombat(`${wavePts.length} ${waveKind === 'fanatic' ? 'fanatics' : 'mooks'} step out of an alcove.`);
+  }
+}
+
+function tickCatacombsLoot() {
+  if (!inCatacombs || !catacombs) return;
+  if (catacombs.lootSpots.length === 0) return;
+  const p = player.getPosition();
+  for (let i = catacombs.lootSpots.length - 1; i >= 0; i--) {
+    const ls = catacombs.lootSpots[i];
+    const dx = p.x - ls.x; const dy = p.y - ls.y; const dz = p.z - ls.z;
+    if (dx * dx + dy * dy + dz * dz < 1.4 * 1.4) {
+      // Award random loot: small gold or healing draught flag.
+      const gold = 25 + Math.floor(Math.random() * 40);
+      inventory.gold = (inventory.gold ?? 0) + gold;
+      logCombat(`You pocket a loose pouch of ${gold} gp from the cache.`);
+      consequences.inc('catacombs_loot_taken', 1, gameClock.state.currentMinute);
+      catacombs.lootSpots.splice(i, 1);
+      playSfx('chime');
     }
   }
 }
@@ -1436,13 +1489,16 @@ function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player
 
 document.getElementById('end-restart')?.addEventListener('click', () => window.location.reload());
 
-// === Save / Load ===
-const SAVE_KEY = 'long-watch-save-v1';
+// === Save / Load (schema v2: adds memory, consequences, gameActor state, seed) ===
+const SAVE_KEY = 'long-watch-save-v2';
+const LEGACY_SAVE_KEY = 'long-watch-save-v1';
+
 function saveGame() {
   if (!started) return;
   try {
     const data = {
-      version: 1,
+      version: 2,
+      seed: getSeed(),
       chosenClass,
       character: {
         name: character.name,
@@ -1454,30 +1510,43 @@ function saveGame() {
       },
       pool: resourcePool,
       learnedSpells,
-      plot: {
-        ...plot,
-        revealed: { ...plot.revealed },
-      },
+      plot: { ...plot, revealed: { ...plot.revealed } },
       clockMinute: gameClock.state.currentMinute,
       assassinSpawned: !!assassinGroup,
       assassinIds: assassinGroup ? assassinGroup.enemies.map(e => ({ kind: e.kind, hp: e.character.hp, x: e.body.position.x, y: e.body.position.y, z: e.body.position.z, dead: e.isDead })) : [],
       pos: { x: player.body.position.x, y: player.body.position.y, z: player.body.position.z, yaw: player.yawAngle, pitch: player.pitch },
-      clueAttempted: clueProps.map(c => ({ id: c.def.id, attempted: c.attempted })),
+      clueAttempted: clueProps.map(c => ({ id: c.def.id, attempted: c.attempted, lastResult: c.lastResult })),
       log: combatLog.slice(-30),
+      // --- Iter 40: persist Memory + ConsequenceStore + gameActor phase ---
+      memory: {
+        events: memory.feed.events,
+        nextEventId: (memory.feed as unknown as { nextId: number }).nextId,
+        reflections: Array.from(memory.reflections.entries()).map(([npcId, list]) => ({ npcId, list })),
+        nextReflectionId: (memory as unknown as { nextReflectionId: number }).nextReflectionId,
+      },
+      consequences: consequences.all(),
+      gamePhase: String(gameActor.getSnapshot().value),
+      inCatacombs,
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     logCombat('Game saved.');
   } catch (err) {
+    console.error('save error', err);
     logCombat('Save failed.');
   }
 }
 
 function loadGame() {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) { logCombat('No save found.'); return; }
+    let raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) {
+      // Backward compat: try v1 once.
+      const legacy = localStorage.getItem(LEGACY_SAVE_KEY);
+      if (!legacy) { logCombat('No save found.'); return; }
+      raw = legacy;
+    }
     const data = JSON.parse(raw);
-    if (data.version !== 1) { logCombat('Save version mismatch.'); return; }
+    if (data.version !== 1 && data.version !== 2) { logCombat('Save version mismatch.'); return; }
     sessionStorage.setItem('__pendingLoad', raw);
     window.location.reload();
   } catch (err) {
@@ -1509,18 +1578,48 @@ function applyPendingLoad() {
     player.pitch = data.pos.pitch;
     for (const c of clueProps) {
       const saved = data.clueAttempted.find((x: any) => x.id === c.def.id);
-      if (saved) c.attempted = saved.attempted;
+      if (saved) {
+        c.attempted = saved.attempted;
+        if ('lastResult' in saved) c.lastResult = saved.lastResult ?? null;
+      }
     }
     for (const line of data.log) combatLog.push(line);
+
+    // --- Iter 40: restore Memory + ConsequenceStore + gameActor phase ---
+    if (data.version === 2) {
+      if (data.seed) setSeed(data.seed);
+      if (data.memory) {
+        memory.clear();
+        (memory.feed as unknown as { events: typeof memory.feed.events }).events = data.memory.events ?? [];
+        (memory.feed as unknown as { nextId: number }).nextId = data.memory.nextEventId ?? 1;
+        for (const r of data.memory.reflections ?? []) {
+          memory.reflections.set(r.npcId, r.list);
+        }
+        (memory as unknown as { nextReflectionId: number }).nextReflectionId = data.memory.nextReflectionId ?? 1;
+      }
+      consequences.clear();
+      for (const f of data.consequences ?? []) {
+        consequences.set(f.name, f.value, f.setAt, f.knownBy ?? 'public');
+      }
+      // Best-effort gamePhase restore via sequenced events.
+      const phase = data.gamePhase as string;
+      gameActor.send({ type: 'START' });
+      if (phase === 'exploring_warned' || phase === 'combat' || phase === 'catacombs') gameActor.send({ type: 'WARNING' });
+      if (phase === 'combat') gameActor.send({ type: 'ASSASSIN_ARRIVED' });
+      if (phase === 'catacombs' || data.inCatacombs) gameActor.send({ type: 'CATACOMBS_ENTER' });
+    }
+
     renderStats();
     renderActionBar();
     renderObjectiveCard();
+    renderCluePanel();
     started = true;
     startScreen!.style.display = 'none';
     setTimeout(() => renderer.domElement.requestPointerLock(), 200);
     logCombat('Game loaded.');
     return true;
   } catch (err) {
+    console.error('load error', err);
     return false;
   }
 }
@@ -1601,9 +1700,12 @@ setTimeout(applyPendingLoad, 0);
 // Expose for debugging
 (window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers, memory, consequences, gameActor };
 (window as any).__gameState = gameActor;
-// Lazy expose dungen + names so console hackers can poke around without inflating cold-start.
-import('./dungenGen').then((m) => { (window as any).__dungen = m; });
-import('./names').then((m) => { (window as any).__names = m; });
+// Expose dungen + names for console hackers. Already in the static graph via
+// catacombs.ts / assassin.ts so no extra payload.
+import * as __dungen from './dungenGen';
+import * as __names from './names';
+(window as any).__dungen = __dungen;
+(window as any).__names = __names;
 
 let prevTime = performance.now();
 function animate() {
@@ -1621,6 +1723,8 @@ function animate() {
   updateInteractHint();
   updateThrowables(dt);
   checkCatacombsExit();
+  tickCatacombsWaves();
+  tickCatacombsLoot();
   tickCatacombsEnemies(dt);
   tickRumorDiffusion(dt);
   if (mp) {

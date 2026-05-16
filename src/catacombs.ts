@@ -36,6 +36,10 @@ export interface Catacombs {
   isOnExit(pos: { x: number; y: number; z: number }, tolerance?: number): boolean;
   /** Pick world-space points on random floor tiles far from spawn (used for enemy placement). */
   pickEnemySpawnPoints(count: number): THREE.Vector3[];
+  /** Pick floor tiles at approximate fractional distance along spawn->exit (0=spawn, 1=exit). */
+  pickWavePoints(distanceFrac: number, count: number): THREE.Vector3[];
+  /** Visible-but-pickable loot cache markers and positions. */
+  lootSpots: THREE.Vector3[];
   dispose(): void;
 }
 
@@ -121,11 +125,54 @@ export function buildCatacombs(scene: THREE.Scene, physics: PhysicsWorld, opts: 
   exitGlow.position.set(grid.exit.x * CELL, 1, grid.exit.y * CELL);
   root.add(exitGlow);
 
+  // --- Loot caches: 3 small glinting markers at floor tiles between waves ---
+  const lootSpots: THREE.Vector3[] = [];
+  const lootCacheGeo = new THREE.BoxGeometry(0.3, 0.25, 0.3);
+  const lootCacheMat = new THREE.MeshStandardMaterial({ color: 0x886633, emissive: 0x442200, emissiveIntensity: 0.4, roughness: 0.6 });
+  for (const frac of [0.35, 0.6, 0.85]) {
+    const pts = pickWavePoints(frac, 1);
+    if (pts.length === 0) continue;
+    const p = pts[0];
+    const m = new THREE.Mesh(lootCacheGeo, lootCacheMat);
+    m.position.set(p.x, 0.15, p.z);
+    m.castShadow = true;
+    root.add(m);
+    const glint = new THREE.PointLight(0xffcc66, 0.6, 3, 2);
+    glint.position.set(p.x, 0.6, p.z);
+    root.add(glint);
+    lootSpots.push(new THREE.Vector3(p.x, 0.6 + Y_OFFSET, p.z));
+  }
+
   function isOnExit(pos: { x: number; y: number; z: number }, tolerance = 1.0): boolean {
     if (Math.abs(pos.y - exit.y) > 3.0) return false;
     const dx = pos.x - exit.x;
     const dz = pos.z - exit.z;
     return Math.sqrt(dx * dx + dz * dz) < tolerance * CELL;
+  }
+
+  /**
+   * Pick world-space points on floor tiles roughly at `distanceFrac` along the
+   * spawn -> exit Manhattan vector. 0 = spawn, 1 = exit. Used for staged waves.
+   */
+  function pickWavePoints(distanceFrac: number, count: number): THREE.Vector3[] {
+    const sx = grid.spawn.x; const sy = grid.spawn.y;
+    const ex = grid.exit.x; const ey = grid.exit.y;
+    const fullDist = Math.abs(ex - sx) + Math.abs(ey - sy);
+    const target = fullDist * distanceFrac;
+    const candidates: { x: number; z: number; dx: number }[] = [];
+    for (let z = 0; z < grid.height; z++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (!grid.isFloor(x, z)) continue;
+        const dSpawn = Math.abs(x - sx) + Math.abs(z - sy);
+        const dx = Math.abs(dSpawn - target);
+        if (dx > 5) continue;
+        candidates.push({ x, z, dx });
+      }
+    }
+    candidates.sort((a, b) => a.dx - b.dx);
+    return candidates.slice(0, count).map(c =>
+      new THREE.Vector3(c.x * CELL, 0.6 + Y_OFFSET, c.z * CELL),
+    );
   }
 
   /**
@@ -166,5 +213,5 @@ export function buildCatacombs(scene: THREE.Scene, physics: PhysicsWorld, opts: 
     ceilMat.dispose();
   }
 
-  return { root, grid, spawn, exit, bodies, isOnExit, pickEnemySpawnPoints, dispose };
+  return { root, grid, spawn, exit, bodies, isOnExit, pickEnemySpawnPoints, pickWavePoints, lootSpots, dispose };
 }

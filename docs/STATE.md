@@ -168,7 +168,13 @@ npm run dev             # http://localhost:3100
 - **Iter 21**: Throwables via cannon-es dynamic spheres. Removed chair-sit healing.
 - **Iter 22-30**: Full faction system, player-attacks-NPC handling, companion (Karla), reputation gates, save/load, mobile controls, Heir AI variants.
 - **Iter 31**: Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
-- **Iter 39** (current): Four new libs onboarded.
+- **Iter 40** (current): Five outstanding items closed.
+  - **Atomic combat frame.** `src/combat.ts` `resolveAttack(att, tgt, opts)` returns a `CombatFrame` (roll/total/damage/postHp/lethal/narrative/sfxCue) WITHOUT mutating anything. `applyCombatFrame(frame, hooks)` is the single mutate-and-narrate step. swingAt refactored. Pattern #3 satisfied: prose + stat-delta + sfx in one transaction.
+  - **Save/load v2.** Schema bumped to `long-watch-save-v2`. Persists Memory (events + per-NPC reflections + nextId counters), ConsequenceStore (all flags with knownBy), gameActor phase, RNG seed. Load restores via `setSeed(...)`, replays gameActor START/WARNING/ASSASSIN_ARRIVED/CATACOMBS_ENTER to reach saved phase. v1 saves still loadable.
+  - **Catacombs depth.** `Catacombs.pickWavePoints(frac, count)` + `lootSpots`. Three staged ambushes at distance 0.30/0.65/0.90 trigger when player approaches each band. Three loot caches (visible boxes + glint lights) award 25-65 gold + chime sfx on pickup. `tickCatacombsWaves()` + `tickCatacombsLoot()` per frame.
+  - **gen-vox v3.** New `CUSTOM_BUILDS` map per character adds distinctive features beyond the trait list: Magrath crossed sabres + longer cape, Mira side panels + skillet, Aldous pocket-watch chain + stand collar, Right Hand satchel + back-dagger, Karla shoulder pad + chest strap, etc. All 7 cast + Karla now flagged `[custom]`. Enemies stay on template.
+  - **Code-splitting.** `vite.config.ts` `manualChunks` splits three/cannon/tone/trystero/threejs-vox-loader/rot-js+labyrinthos/xstate/seedrandom/dice-typescript/fantastical into separate bundles. Initial index bundle dropped from 1.3 MB to ~147 KB. Total parallelisable.
+- **Iter 39**: Four new libs onboarded.
   - **tone.js -> `src/audio.ts`.** Synthesized SFX (no audio files shipped). Tone unlocks on first click. Triggers at swing/hit/fall/door/rumble/dawn.
   - **seedrandom -> `src/rng.ts`.** `?seed=` URL param yields a deterministic plot + catacombs layout. plot.ts and dungenGen route through `roll(sides)`. Seed displayed on objective card.
   - **xstate -> `src/gameState.ts`.** Top-level FSM (`intro/exploring/exploring_warned/combat/catacombs/ending_*`). main.ts sends transitions at each milestone. Exposed via `window.__gameState`.
