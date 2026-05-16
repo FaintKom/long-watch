@@ -28,6 +28,8 @@ import { buildCatacombs, Catacombs } from './catacombs';
 import { currentSpot } from './schedules';
 import { computeWitnesses, diffuseRumors } from './witnesses';
 import { unlockAudio, play as playSfx, setAmbient } from './audio';
+import { spawnBurst, tickParticles, bindParticleScene } from './particles';
+import { attachFpHands, swingAnim, tickFpHands } from './fpHands';
 import { resolveAttack, applyCombatFrame } from './combat';
 import { getSeed, setSeed } from './rng';
 import { startGameActor } from './gameState';
@@ -58,6 +60,7 @@ scene.fog = new THREE.FogExp2(0x14110d, 0.022);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
 
+bindParticleScene(scene);
 const ambientLight = new THREE.AmbientLight(0x556677, 0.5);
 scene.add(ambientLight);
 const hemiLight = new THREE.HemisphereLight(0x668899, 0x332211, 0.4);
@@ -615,6 +618,7 @@ startBtn?.addEventListener('click', () => {
   renderStats();
   renderActionBar();
   started = true;
+  attachFpHands(camera, chosenClass);
   gameActor.send({ type: 'START' });
   startScreen!.style.display = 'none';
   renderer.domElement.requestPointerLock();
@@ -1268,6 +1272,7 @@ window.addEventListener('mousedown', (e) => {
 });
 
 function swingAt(target: Enemy) {
+  swingAnim();
   let sneakDmg = 0;
   if (chosenClass === 'rogue' && sneakReady) {
     sneakDmg = sneakAttackDamage(character);
@@ -1284,6 +1289,15 @@ function swingAt(target: Enemy) {
     playSfx,
     onLethal: () => { target.destroy(scene, physics); },
     onResolved: (f) => {
+      if (f.hit) {
+        spawnBurst({
+          origin: { x: target.body.position.x, y: target.body.position.y + 0.5, z: target.body.position.z },
+          color: f.critical ? 0xffeeaa : 0xffaa44,
+          count: f.critical ? 36 : 18,
+          speed: f.critical ? 3.5 : 2.5,
+          lifeSeconds: 0.6,
+        });
+      }
       if (sneakDmg > 0 && f.hit) logCombat(`(...includes ${sneakDmg} sneak attack damage.)`);
     },
   });
@@ -2029,6 +2043,8 @@ function animate() {
   tickNpcTalk(dt);
   tickCandles(dt);
   tickDawnDim();
+  tickParticles(dt);
+  tickFpHands(dt);
   if (mp) {
     const p = player.getPosition();
     mp.pushSelfPos(p.x, p.y, p.z, player.yaw.rotation.y, character.name);
