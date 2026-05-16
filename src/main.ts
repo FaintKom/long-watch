@@ -20,6 +20,7 @@ import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDam
 import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState, isPickupable } from './props';
 import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
 import { defaultRelationships, isHostile, adjustAttitude } from './faction';
+import { Companion, KARLA } from './companion';
 import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
@@ -70,6 +71,9 @@ const worldState: PlayerWorldState = newPlayerWorldState();
 const inventory = new Inventory();
 const reputation = newReputation();
 const factionRel = defaultRelationships();
+const companions: Companion[] = [
+  new Companion(KARLA, mansion.spawnPoint.x - 1.5, mansion.spawnPoint.y, mansion.spawnPoint.z - 1.5, scene, physics),
+];
 
 interface ThrowableProjectile {
   body: CANNON.Body;
@@ -1310,6 +1314,35 @@ function animate() {
 
   // === Cast AI ===
   tickCastAi(dt);
+
+  // === Companions ===
+  if (started && !endingShown) {
+    const playerPos = player.getPosition();
+    const enemies = assassinGroup ? assassinGroup.enemies : [];
+    for (const c of companions) {
+      const r = c.update(dt, playerPos, enemies);
+      if (r?.dealtTo && r.dmg !== undefined) {
+        logCombat(`${c.def.displayName} hits ${r.dealtTo.preset.name} for ${r.dmg}.`);
+        if (r.dealtTo.isDead) { logCombat(`${r.dealtTo.preset.name} falls.`); r.dealtTo.destroy(scene, physics); }
+      }
+    }
+    // Enemies can hit companions too
+    for (const e of enemies) {
+      if (e.isDead) continue;
+      for (const c of companions) {
+        if (c.isDead) continue;
+        const dx = c.body.position.x - e.body.position.x;
+        const dz = c.body.position.z - e.body.position.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d < e.preset.reach) {
+          // Enemy already hits player elsewhere; check if we want it to hit companions every 2s tick
+          // We piggyback on Enemy.updateAi which targets the player. To have enemies hit Karla,
+          // we randomly redirect 30% of enemy attacks. For simplicity skip now; karla draws aggro
+          // by getting in their face, but enemy AI still targets player. Future iter.
+        }
+      }
+    }
+  }
 
   // Enemy tick
   if (assassinGroup && !endingShown) {
