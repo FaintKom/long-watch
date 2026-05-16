@@ -77,6 +77,53 @@
       font-size: 11px; color: #555;
     }
     #start-screen .credit a { color: #888; text-decoration: none; }
+
+    #interact-hint {
+      position: absolute; top: 58%; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85); padding: 8px 16px;
+      border-radius: 4px; font-size: 15px;
+      border: 1px solid #fc4; color: #fc4;
+      font-weight: bold;
+      display: none;
+      z-index: 15;
+    }
+
+    #dialogue-panel {
+      position: fixed; left: 50%; bottom: 60px;
+      transform: translateX(-50%);
+      width: 600px; max-height: 65vh;
+      background: rgba(20,15,10,0.96); border: 2px solid #fc4;
+      border-radius: 6px; padding: 16px;
+      color: #eee; font-size: 14px; line-height: 1.5;
+      display: none; flex-direction: column; gap: 10px;
+      pointer-events: auto; z-index: 50;
+    }
+    #dialogue-panel.active { display: flex; }
+    #dialogue-panel .dlg-name { color: #fc4; font-weight: bold; font-size: 16px; }
+    #dialogue-panel .dlg-stream {
+      color: #ddd; min-height: 1.6em;
+      padding: 8px 0; border-bottom: 1px solid #444;
+    }
+    #dialogue-panel .dlg-history-line { color: #aaa; font-size: 13px; padding: 2px 0; }
+    #dialogue-panel .dlg-history-line.you { color: #6cf; }
+    #dialogue-panel .dlg-row {
+      display: flex; gap: 6px;
+    }
+    #dialogue-panel input {
+      flex: 1; padding: 8px 10px;
+      background: rgba(10,10,10,0.95); border: 1px solid #555;
+      color: #eee; font-family: inherit; font-size: 13px;
+      border-radius: 4px; outline: none;
+    }
+    #dialogue-panel input:focus { border-color: #fc4; }
+    #dialogue-panel button {
+      padding: 8px 14px; background: #2a2a2a; color: #fc4;
+      border: 1px solid #fc4; border-radius: 4px; cursor: pointer;
+      font-family: inherit; font-size: 13px;
+    }
+    #dialogue-panel button:hover { background: #3a3a2a; }
+    #dialogue-panel .dlg-hint { font-size: 11px; color: #888; }
   </style>
 </head>
 <body>
@@ -101,7 +148,9 @@
     <div id="clock">9:00 PM</div>
     <div id="stats-panel"></div>
     <div id="objective-card"></div>
+    <div id="interact-hint"></div>
   </div>
+  <div id="dialogue-panel"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
