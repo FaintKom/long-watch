@@ -21,6 +21,7 @@ import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance,
 import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
 import { defaultRelationships, isHostile, adjustAttitude } from './faction';
 import { Companion, KARLA } from './companion';
+import { WorldFeed, formatEventsForPrompt } from './events';
 import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
@@ -417,11 +418,14 @@ paintClock();
 
 let assassinGroup: SpawnedAssassinGroup | null = null;
 const combatLog: string[] = [];
+const worldFeed = new WorldFeed();
+/** Log to UI combat log AND chronicle to world feed (public). For targeted events use worldFeed.add directly. */
 function logCombat(line: string) {
   combatLog.push(line);
   console.log('[Long Watch]', line);
   const el = document.getElementById('combat-log');
   if (el) el.innerHTML = combatLog.slice(-8).map(l => `<div>${l}</div>`).join('');
+  worldFeed.add(line, gameClock.state.currentMinute, 'public');
 }
 
 gameClock.onTick = (e) => {
@@ -815,6 +819,9 @@ async function streamReply(message: string) {
     if (reputation.alarmed) attitudeContext += ' The household is ON ALARM tonight (intrusion or theft has occurred).';
 
     const personaWithRep = cm.def.persona.persona + '\n\nCURRENT MOOD CONTEXT: ' + attitudeContext;
+    const recentEvents = worldFeed.recentFor(cm.def.id, 8);
+    const eventsBlock = formatEventsForPrompt(recentEvents);
+    const currentTime = gameClock.formatted();
 
     const resp = await fetch('/api/npc-chat', {
       method: 'POST',
@@ -822,9 +829,17 @@ async function streamReply(message: string) {
       body: JSON.stringify({
         npcName: cm.def.displayName,
         persona: personaWithRep,
+        backstory: cm.def.persona.backstory,
+        positionTonight: cm.def.persona.positionTonight,
+        motivation: cm.def.persona.motivation,
+        dailyRoutine: cm.def.persona.dailyRoutine,
+        relationships: cm.def.persona.relationships,
         knownFacts: cm.def.persona.knownFacts,
         hiddenFacts: cm.def.persona.hiddenFacts,
         speechStyle: cm.def.persona.speechStyle,
+        voiceSamples: cm.def.persona.voiceSamples,
+        recentEvents: eventsBlock,
+        currentTime,
         history: cm.history.slice(0, -1),
         message,
       }),
