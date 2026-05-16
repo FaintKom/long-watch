@@ -11,7 +11,7 @@ import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
 import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES, BOSSES } from './plot';
 import { GameClock } from './clock';
 import { CAST, CastMember, CastId, applyPlotContext } from './cast';
-import { Enemy, enrichPresetsFromSRD } from './enemy';
+import { Enemy, EnemyKind, enrichPresetsFromSRD } from './enemy';
 import { spawnAssassin, SpawnedAssassinGroup } from './assassin';
 import { rollDice, rollNd, rollFormula, rollAttackDamage } from './character';
 import { CLASSES, ClassId, applyClass } from './classes';
@@ -19,7 +19,7 @@ import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
 import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState, isPickupable } from './props';
 import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
-import { defaultRelationships, isHostile, adjustAttitude } from './faction';
+import { defaultRelationships, isHostile, adjustAttitude, ASSASSIN_FACTION } from './faction';
 import { Companion, KARLA } from './companion';
 import { WorldFeed } from './events';
 import { Memory, formatMemoryForPrompt } from './memory';
@@ -437,6 +437,7 @@ gameClock.onTick = (e) => {
   if (e.triggerWarning) {
     logCombat('A chill runs through the manor. Something draws near.');
     consequences.set('assassin_arrival_imminent', true, gameClock.state.currentMinute);
+    dispatchOffscreenBeat('warning');
   }
   if (e.triggerAssassin) {
     assassinGroup = spawnAssassin(plot.assassin, scene, physics, mansion);
@@ -445,6 +446,7 @@ gameClock.onTick = (e) => {
     consequences.set('assassin_arrived', true, gameClock.state.currentMinute);
     consequences.set('assassin_kind', plot.assassin, gameClock.state.currentMinute);
     renderObjectiveCard();
+    dispatchOffscreenBeat('assassin_arrived');
   }
   if (e.triggerDawn) {
     logCombat('Dawn breaks. The Heir survives.');
@@ -918,6 +920,10 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') closeDialogue();
     return;
   }
+  if (e.code === 'KeyC') {
+    toggleCluePanel();
+    return;
+  }
   if (e.code === 'KeyT') {
     // Open shop with nearest cast member who sells
     const cm = nearestCastMember();
@@ -1027,6 +1033,8 @@ function examineClue(c: CluePropInstance) {
   c.attempted = true;
   gameClock.advance('investigate');
   const res = attemptClue(c.def, character, plot);
+  c.lastResult = res;
+  consequences.set(`clue_examined_${c.def.id}`, res.passed, gameClock.state.currentMinute);
   logCombat(`${c.def.label}: ${c.def.flavorOnFind}`);
   logCombat(`Roll ${res.roll} (total ${res.total}) vs DC ${c.def.check.dc}: ${res.passed ? 'PASS' : 'FAIL'} - ${res.text}`);
   if (res.revealedBoss) {
@@ -1035,6 +1043,52 @@ function examineClue(c: CluePropInstance) {
     consequences.set('boss_id', plot.boss, gameClock.state.currentMinute);
     renderObjectiveCard();
   }
+  renderCluePanel();
+}
+
+let cluePanelOpen = false;
+function toggleCluePanel() {
+  cluePanelOpen = !cluePanelOpen;
+  const el = document.getElementById('clue-panel');
+  if (!el) return;
+  el.classList.toggle('open', cluePanelOpen);
+  if (cluePanelOpen) renderCluePanel();
+}
+
+function renderCluePanel() {
+  const el = document.getElementById('clue-panel');
+  if (!el) return;
+  const examined = clueProps.filter(c => c.attempted);
+  let html = `<h4>EVIDENCE LOG  <span style="color:#888;font-weight:normal">[C to close]</span></h4>`;
+  if (examined.length === 0) {
+    html += `<div class="clue-empty">You have not examined any clues yet. Glowing objects scattered through the manor reveal who hired the contract.</div>`;
+  } else {
+    for (const c of examined) {
+      const r = c.lastResult;
+      const passed = r?.passed;
+      const passClass = passed ? 'passed' : 'failed';
+      const passWord = passed ? 'PASS' : 'FAIL';
+      html += `<div class="clue-entry">`;
+      html += `<div class="clue-label">${escapeHtml(c.def.label)}</div>`;
+      html += `<div class="clue-result ${passClass}">${passWord} — ${r ? escapeHtml(r.text) : ''}</div>`;
+      if (passed) {
+        const names = c.def.reveals.map(b => BOSSES[b]?.name ?? b).join(', ');
+        html += `<div class="clue-reveals">Points at: ${escapeHtml(names)}</div>`;
+      }
+      html += `</div>`;
+    }
+  }
+  // Append world flags so the player can see what NPCs know.
+  const flags = consequences.all().filter(f => f.value === true || (typeof f.value !== 'boolean'));
+  if (flags.length > 0) {
+    html += `<div class="clue-flags"><b>World state:</b><br>` +
+      flags.slice(-10).map(f => {
+        if (typeof f.value === 'boolean') return `- ${escapeHtml(f.name)}`;
+        return `- ${escapeHtml(f.name)} = ${escapeHtml(String(f.value))}`;
+      }).join('<br>') +
+      `</div>`;
+  }
+  el.innerHTML = html;
 }
 
 // LMB to attack — prefers nearest enemy in reach, then cast member (intentional violence)
@@ -1044,17 +1098,19 @@ window.addEventListener('mousedown', (e) => {
   if (e.button !== 0 || !document.pointerLockElement) return;
 
   const pos = player.getPosition();
-  // First: any enemy in reach
+  // First: any enemy in reach (mansion assassins OR catacombs ambush)
   let enemyTarget: Enemy | null = null;
   let bestEnemyDist = PLAYER_MELEE_REACH;
-  if (assassinGroup) {
-    for (const en of assassinGroup.enemies) {
-      if (en.isDead) continue;
-      const dx = en.body.position.x - pos.x;
-      const dz = en.body.position.z - pos.z;
-      const d = Math.sqrt(dx * dx + dz * dz);
-      if (d < bestEnemyDist) { enemyTarget = en; bestEnemyDist = d; }
-    }
+  const enemyPool: Enemy[] = [
+    ...(assassinGroup ? assassinGroup.enemies : []),
+    ...catacombsEnemies,
+  ];
+  for (const en of enemyPool) {
+    if (en.isDead) continue;
+    const dx = en.body.position.x - pos.x;
+    const dz = en.body.position.z - pos.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < bestEnemyDist) { enemyTarget = en; bestEnemyDist = d; }
   }
   if (enemyTarget) { swingAt(enemyTarget); return; }
 
@@ -1122,6 +1178,7 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
     consequences.set('household_alarmed', true, gameClock.state.currentMinute);
     consequences.set(`player_attacked_${cm.def.id}`, true, gameClock.state.currentMinute);
     consequences.inc('cast_npcs_attacked_by_player', 1, gameClock.state.currentMinute);
+    dispatchOffscreenBeat(`player_attacked_${cm.def.id}`);
     // Tank faction relationship — fletcher_house now hostile to player_party
     adjustAttitude(factionRel, 'fletcher_house', 'player_party', -40);
     adjustAttitude(factionRel, 'player_party', 'fletcher_house', -40);
@@ -1150,20 +1207,113 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   }
 }
 
+// --- Off-screen NPC beats (Bobby-Gray pattern #5) ---
+let beatInFlight = false;
+/**
+ * Ask Groq for one short third-person action per active NPC and push them as
+ * NPC-scoped memory events. Fire-and-forget. Triggered at major milestones
+ * (warning, assassin arrival, first-attack, catacombs entry).
+ */
+function dispatchOffscreenBeat(beatLabel: string): void {
+  if (beatInFlight) return;
+  beatInFlight = true;
+  const activeNpcs = castMembers
+    .filter((cm) => !cm.isDead)
+    .map((cm) => ({
+      id: cm.def.id,
+      displayName: cm.def.displayName,
+      persona: cm.def.persona.persona,
+      positionTonight: cm.def.persona.positionTonight ?? '',
+      motivation: cm.def.persona.motivation ?? '',
+    }));
+  const flagsBlock = formatFlagsForPrompt(consequences.all());
+  fetch('/api/npc-beat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      npcs: activeNpcs,
+      flags: flagsBlock,
+      currentTime: gameClock.formatted(),
+      beatLabel,
+    }),
+  })
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`npc-beat ${r.status}`);
+      const data = (await r.json()) as { actions?: { npcId: string; text: string }[] };
+      const actions = data.actions ?? [];
+      for (const a of actions) {
+        // Visibility scoped to the NPC who took the action - others don't know.
+        memory.addEvent(`[off-screen] ${a.text}`, gameClock.state.currentMinute, [a.npcId as CastId]);
+      }
+      if (actions.length > 0) {
+        console.log('[Long Watch] off-screen beat actions:', actions);
+      }
+    })
+    .catch((e) => console.warn('[off-screen-beat] failed:', e))
+    .finally(() => { beatInFlight = false; });
+}
+
 // --- Act-2 catacombs (escape route) ---
 let catacombs: Catacombs | null = null;
 let inCatacombs = false;
+/** Enemies spawned exclusively inside the catacombs. Separate from the mansion's assassinGroup. */
+const catacombsEnemies: Enemy[] = [];
+
 function enterCatacombs() {
   if (inCatacombs) return;
   inCatacombs = true;
   logCombat('You descend through the trapdoor into damp stone.');
   consequences.set('entered_catacombs', true, gameClock.state.currentMinute);
+  dispatchOffscreenBeat('player_descended_catacombs');
   // Hide the mansion mesh and freeze cast meshes so they don't render below.
   world.group.visible = false;
   for (const cm of castMembers) cm.group.visible = false;
   catacombs = buildCatacombs(scene, physics, { seed: plot.bossRoll });
   player.setPosition(catacombs.spawn.x, catacombs.spawn.y, catacombs.spawn.z);
   player.yaw.position.set(catacombs.spawn.x, catacombs.spawn.y, catacombs.spawn.z);
+
+  // Hostile encounter: if the assassin has already breached the mansion,
+  // a rear-guard ambush waits in the catacombs.
+  if (consequences.has('assassin_arrived')) {
+    const points = catacombs.pickEnemySpawnPoints(3);
+    // Pick enemy kind by assassin id: mook ambush for human assassins, fanatics for cults.
+    const ambushKind: EnemyKind = plot.assassin === 'cult_of_umberlee' ? 'fanatic' : 'mook';
+    for (const p of points) {
+      const e = new Enemy(ambushKind, p.x, p.y, p.z, scene, physics);
+      e.faction = ASSASSIN_FACTION[plot.assassin];
+      catacombsEnemies.push(e);
+    }
+    if (points.length > 0) {
+      logCombat(`A rear-guard waits in the dark - ${points.length} ${ambushKind === 'fanatic' ? 'fanatics' : 'mooks'} step from the shadows.`);
+      consequences.set('catacombs_ambush', true, gameClock.state.currentMinute);
+      gameClock.enterCombat();
+    }
+  }
+}
+
+function tickCatacombsEnemies(dt: number): void {
+  if (!inCatacombs || catacombsEnemies.length === 0) return;
+  const playerPos = player.getPosition();
+  for (const e of catacombsEnemies) {
+    if (e.isDead) continue;
+    const dmg = e.updateAi(dt, playerPos, character.ac, character);
+    if (dmg > 0) {
+      logCombat(`Catacombs ${e.preset.name} hits you for ${dmg}.`);
+      renderStats();
+    }
+    if (e.isDead) {
+      logCombat(`Catacombs ${e.preset.name} falls.`);
+      e.destroy(scene, physics);
+    }
+  }
+  // Clear dead ones and exit combat if all gone.
+  for (let i = catacombsEnemies.length - 1; i >= 0; i--) {
+    if (catacombsEnemies[i].isDead) catacombsEnemies.splice(i, 1);
+  }
+  if (catacombsEnemies.length === 0 && consequences.has('catacombs_ambush')) {
+    gameClock.exitCombat();
+    logCombat('The catacombs go silent again. The exit is clear.');
+  }
 }
 
 function checkCatacombsExit() {
@@ -1400,6 +1550,7 @@ function animate() {
   updateInteractHint();
   updateThrowables(dt);
   checkCatacombsExit();
+  tickCatacombsEnemies(dt);
 
   // === Cast AI ===
   tickCastAi(dt);

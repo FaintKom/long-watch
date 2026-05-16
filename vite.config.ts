@@ -248,12 +248,126 @@ function npcReflectPlugin(env: Record<string, string>): Plugin {
   };
 }
 
+/**
+ * NPC off-screen beat proxy. Frontend posts:
+ *   {
+ *     npcs: [{id, displayName, persona, positionTonight, motivation}],
+ *     flags: string,            // serialised consequence flags
+ *     currentTime: string,      // "10:30 PM" etc.
+ *     beatLabel: string,        // e.g. "warning", "assassin_arrived"
+ *   }
+ * We ask Groq for one short third-person action per NPC describing what they
+ * are doing off-screen RIGHT NOW. Returns: { actions: [{npcId, text}] }.
+ */
+function npcBeatPlugin(env: Record<string, string>): Plugin {
+  return {
+    name: 'npc-beat-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/npc-beat', async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('Method Not Allowed');
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body);
+            const { npcs, flags, currentTime, beatLabel } = payload as {
+              npcs: { id: string; displayName: string; persona: string; positionTonight: string; motivation: string }[];
+              flags: string;
+              currentTime: string;
+              beatLabel: string;
+            };
+
+            const roster = (npcs || [])
+              .map((n) => `- ${n.id} (${n.displayName}): ${n.persona}\n  position tonight: ${n.positionTonight}\n  wants: ${n.motivation}`)
+              .join('\n');
+
+            const systemPrompt = [
+              `You are the off-screen director for "Long Watch", a one-night thriller in a coastal merchant manor.`,
+              `For each NPC in the roster, write ONE third-person sentence describing what they are doing RIGHT NOW (${currentTime}). They are off-screen from the player. The current beat label is "${beatLabel}".`,
+              ``,
+              `Rules:`,
+              `- One line per NPC, prefixed by their id and a colon. Example: "matriarch: She paces the study, blade resting across her knees."`,
+              `- Past or present tense, your choice, but stay consistent.`,
+              `- Action must fit their persona + position + motivation + current world flags. No teleporting, no impossible knowledge.`,
+              `- Match the language of the persona text (Russian if persona is in Russian).`,
+              `- Under 25 words per line. No quotes. No exposition. No bullet markers.`,
+              `- If an NPC has no plausible new action, write a single still-life sentence (still tending the kettle, still listening at the door, etc).`,
+            ].join('\n');
+
+            const userPrompt =
+              `WORLD STATE FLAGS:\n${flags || '(none)'}\n\n` +
+              `ROSTER:\n${roster}\n\n` +
+              `Write one sentence per NPC now.`;
+
+            const apiKey = env.GROQ_API_KEY;
+            const model = env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+            if (!apiKey) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: 'Missing GROQ_API_KEY' }));
+              return;
+            }
+
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: userPrompt },
+                ],
+                temperature: 0.65,
+                max_tokens: 400,
+                stream: false,
+              }),
+            });
+
+            if (!groqRes.ok) {
+              const errText = await groqRes.text();
+              res.statusCode = groqRes.status;
+              res.end(JSON.stringify({ error: errText.slice(0, 500) }));
+              return;
+            }
+
+            const data = await groqRes.json() as { choices?: { message?: { content?: string } }[] };
+            const raw = data.choices?.[0]?.message?.content ?? '';
+            // Parse "id: action" lines.
+            const validIds = new Set((npcs || []).map((n) => n.id));
+            const actions: { npcId: string; text: string }[] = [];
+            for (const line of raw.split('\n')) {
+              const m = line.match(/^\s*[-*]?\s*([a-z_]+)\s*[:.\-]\s*(.+)$/);
+              if (!m) continue;
+              const id = m[1];
+              if (!validIds.has(id)) continue;
+              const text = m[2].trim().replace(/^["'']+|["'']+$/g, '');
+              if (text.length > 0 && text.length <= 240) actions.push({ npcId: id, text });
+            }
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ actions }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(err) }));
+          }
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
     root: '.',
     publicDir: 'public',
     server: { port: 3100 },
-    plugins: [npcChatPlugin(env), npcReflectPlugin(env)],
+    plugins: [npcChatPlugin(env), npcReflectPlugin(env), npcBeatPlugin(env)],
   };
 });

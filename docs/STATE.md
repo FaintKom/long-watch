@@ -50,7 +50,7 @@ Env: `.env` with `GROQ_API_KEY=...` (gitignored). Optional `GROQ_MODEL=`.
 | `names.ts` | `fantastical` wrappers: `commonerName()`, `speciesName(species, gender)`, `tavernName()`, `guildName()`, `commonerParty(n)`. Used by `assassin.ts` for mook/cult leader naming and exposed via `__names` in console. |
 | `dungenGen.ts` | `Labyrinthos` wrapper: `generateDungeon({width,height,algorithm})` -> `DungeonGrid {data, spawn, exit, isFloor, isWall}`. `generateCatacombs(seed)` preset for the act-2 escape route. |
 | `catacombs.ts` | Extrudes a `DungeonGrid` into a Three.js + cannon-es sub-level positioned at `Y_OFFSET=30` (above mansion roof). InstancedMesh walls, per-cell static colliders, sparse torch lights, exit ring marker. `buildCatacombs(scene, physics, {seed})` returns `{root, spawn, exit, bodies, isOnExit, dispose}`. `main.ts` calls it when the player interacts with the trapdoor prop in the storage room. |
-| `consequences.ts` | `ConsequenceStore` flag map keyed by lowercase_snake_case strings. `set/get/has/inc/knownBy/all`. Flags wired at: warning tick, assassin arrival, dawn, first-NPC-attack, boss-proven, catacombs entry/exit. Format via `formatFlagsForPrompt` for the Groq prompt. |
+| `consequences.ts` | `ConsequenceStore` flag map keyed by lowercase_snake_case strings. `set/get/has/inc/knownBy/all`. Flags wired at: warning tick, assassin arrival, dawn, first-NPC-attack, boss-proven, catacombs entry/exit, clue-pass/fail. Format via `formatFlagsForPrompt` for the Groq prompt. |
 
 ---
 
@@ -128,6 +128,7 @@ Hybrid event-driven + idle drift.
 | T | Trade with nearest shop NPC |
 | I | Use selected inventory item |
 | Esc | Close dialogue/shop |
+| C | Toggle clue inventory / evidence log |
 | F5 | Save |
 | F9 | Load |
 
@@ -162,7 +163,11 @@ npm run dev             # http://localhost:3100
 - **Iter 21**: Throwables via cannon-es dynamic spheres. Removed chair-sit healing.
 - **Iter 22-30**: Full faction system, player-attacks-NPC handling, companion (Karla), reputation gates, save/load, mobile controls, Heir AI variants.
 - **Iter 31**: Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
-- **Iter 36** (current): Four parallel additions wrapping up `docs/REFERENCE_PROMPTS.md` "next steals".
+- **Iter 37** (current): Three deferred items from Iter 36 follow-up.
+  - **Catacombs hostile encounter.** `enterCatacombs()` checks `consequences.has('assassin_arrived')`. If true, spawns 3 mooks (or fanatics for the Sea Cult plot) via `catacombs.pickEnemySpawnPoints(3)` far from spawn. New module-level `catacombsEnemies: Enemy[]` ticked by `tickCatacombsEnemies(dt)` every frame; player melee + LMB also routes to them through a merged enemy pool. Defeating all clears combat and reopens the exit.
+  - **Clue inventory UI.** New `#clue-panel` HTML pane (right-top corner) listing every examined clue with PASS/FAIL color + Boss reveal + a recent world-flag tail. `C` toggles. `CluePropInstance` now carries `lastResult`. examineClue stores it + sets a `clue_examined_<id>` flag.
+  - **Off-screen NPC beats (Bobby-Gray pattern #5).** New `/api/npc-beat` Vite proxy returns one third-person action sentence per active NPC ("matriarch: She paces the study, blade across her knees."). `dispatchOffscreenBeat(label)` fires at warning, assassin arrival, first-NPC-attack, and catacombs entry. Each returned line is pushed to `memory.addEvent(..., [npcId])` with NPC-scoped visibility so only that NPC remembers its own off-screen move.
+- **Iter 36**: Four parallel additions wrapping up `docs/REFERENCE_PROMPTS.md` "next steals".
   - **Catacombs sub-level.** `src/catacombs.ts` extrudes `generateCatacombs(seed)` grid into Three.js + cannon-es geometry at `Y_OFFSET=30`. New `trapdoor` prop kind in `src/props.ts` placed in the storage room. Interacting hides the mansion meshes, teleports the player to catacombs spawn, exit ring marker triggers a new `escaped_catacombs` ending. Per-frame `checkCatacombsExit()` polls.
   - **Consequence flag store.** `src/consequences.ts` `ConsequenceStore` with `set/has/inc/knownBy`. Wired at warning/arrival/dawn/first-attack/boss-proven/catacombs. Flags injected into the Groq npc-chat system prompt as ground-truth world state (pattern #4: consequence > event for clues).
   - **Per-NPC prompt polish.** `streamReply` now sends top-2 personal reflections AND consequence flags separately. Vite proxy lays them out as `=== YOUR LATEST THOUGHTS ===` + `=== WORLD STATE FLAGS YOU KNOW ABOUT ===` blocks. Pattern #1: distilled voice notes per-NPC, not whole roster.

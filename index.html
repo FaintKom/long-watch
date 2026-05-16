@@ -244,6 +244,30 @@
     #inv-panel .inv-line { display: flex; justify-content: space-between; }
     #inv-panel .gold-line { color: #fc4; font-weight: bold; border-bottom: 1px solid #443; padding-bottom: 4px; margin-bottom: 4px; }
 
+    #clue-panel {
+      position: absolute; right: 16px; top: 16px;
+      width: 280px; max-height: 70vh; overflow-y: auto;
+      background: rgba(10,8,5,0.95);
+      border: 1px solid #884; border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 12px; line-height: 1.55;
+      color: #ddd;
+      display: none;
+      pointer-events: auto;
+      z-index: 50;
+    }
+    #clue-panel.open { display: block; }
+    #clue-panel h4 { color: #fc4; font-size: 13px; margin-bottom: 6px; letter-spacing: 0.5px; }
+    #clue-panel .clue-entry { border-top: 1px solid #443; padding: 6px 0; }
+    #clue-panel .clue-entry:first-of-type { border-top: none; }
+    #clue-panel .clue-label { color: #fc4; font-weight: bold; }
+    #clue-panel .clue-result.passed { color: #6dd06d; }
+    #clue-panel .clue-result.failed { color: #d88; }
+    #clue-panel .clue-result { font-size: 11px; margin-top: 2px; }
+    #clue-panel .clue-reveals { color: #aaa; font-style: italic; font-size: 11px; margin-top: 2px; }
+    #clue-panel .clue-flags { color: #999; font-size: 11px; margin-top: 6px; padding-top: 4px; border-top: 1px dashed #443; }
+    #clue-panel .clue-empty { color: #888; font-style: italic; }
+
     #shop-panel {
       position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
@@ -309,6 +333,7 @@
   <div id="combat-log"></div>
   <div id="action-bar"></div>
   <div id="inv-panel"></div>
+  <div id="clue-panel"></div>
   <div id="shop-panel"></div>
 
   <div id="mobile-controls">

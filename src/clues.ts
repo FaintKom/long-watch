@@ -97,10 +97,20 @@ export const CLUES: ClueDef[] = [
   },
 ];
 
+export interface ClueAttemptResult {
+  passed: boolean;
+  roll: number;
+  total: number;
+  revealedBoss: boolean;
+  text: string;
+}
+
 export interface CluePropInstance {
   def: ClueDef;
   mesh: THREE.Mesh;
   attempted: boolean;
+  /** Last attempt result; null until the player has examined this clue. */
+  lastResult: ClueAttemptResult | null;
 }
 
 export function buildClueProps(scene: THREE.Scene): CluePropInstance[] {
@@ -115,17 +125,9 @@ export function buildClueProps(scene: THREE.Scene): CluePropInstance[] {
     light.position.copy(mesh.position);
     light.position.y += 0.3;
     scene.add(light);
-    result.push({ def: c, mesh, attempted: false });
+    result.push({ def: c, mesh, attempted: false, lastResult: null });
   }
   return result;
-}
-
-export interface ClueAttemptResult {
-  passed: boolean;
-  roll: number;
-  total: number;
-  revealedBoss: boolean;
-  text: string;
 }
 
 export function attemptClue(clue: ClueDef, character: Character, plot: PlotRoll): ClueAttemptResult {

@@ -34,6 +34,8 @@ export interface Catacombs {
   bodies: CANNON.Body[];
   /** Returns true when world position is within `tolerance` (tiles) of the exit center. */
   isOnExit(pos: { x: number; y: number; z: number }, tolerance?: number): boolean;
+  /** Pick world-space points on random floor tiles far from spawn (used for enemy placement). */
+  pickEnemySpawnPoints(count: number): THREE.Vector3[];
   dispose(): void;
 }
 
@@ -126,6 +128,33 @@ export function buildCatacombs(scene: THREE.Scene, physics: PhysicsWorld, opts: 
     return Math.sqrt(dx * dx + dz * dz) < tolerance * CELL;
   }
 
+  /**
+   * Pick world-space points on random floor tiles, biased toward the back of
+   * the catacombs (away from spawn) so enemies sit between player and exit.
+   * Returns at most `count` points. May return fewer if grid is too small.
+   */
+  function pickEnemySpawnPoints(count: number): THREE.Vector3[] {
+    const floors: { x: number; z: number }[] = [];
+    for (let z = 0; z < grid.height; z++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (!grid.isFloor(x, z)) continue;
+        const dxSpawn = x - grid.spawn.x;
+        const dzSpawn = z - grid.spawn.y;
+        const dSpawn = Math.sqrt(dxSpawn * dxSpawn + dzSpawn * dzSpawn);
+        if (dSpawn < 5) continue; // not next to the player's drop point
+        floors.push({ x, z });
+      }
+    }
+    // Shuffle.
+    for (let i = floors.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [floors[i], floors[j]] = [floors[j], floors[i]];
+    }
+    return floors.slice(0, count).map(f =>
+      new THREE.Vector3(f.x * CELL, 0.6 + Y_OFFSET, f.z * CELL),
+    );
+  }
+
   function dispose(): void {
     scene.remove(root);
     for (const b of bodies) physics.removeBody(b);
@@ -137,5 +166,5 @@ export function buildCatacombs(scene: THREE.Scene, physics: PhysicsWorld, opts: 
     ceilMat.dispose();
   }
 
-  return { root, grid, spawn, exit, bodies, isOnExit, dispose };
+  return { root, grid, spawn, exit, bodies, isOnExit, pickEnemySpawnPoints, dispose };
 }
