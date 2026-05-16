@@ -9,6 +9,7 @@ import { Player } from './player';
 import { Character } from './character';
 import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
 import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES } from './plot';
+import { GameClock } from './clock';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -93,21 +94,45 @@ console.log('[Long Watch] Plot rolled:', {
   myObjective: myObjective.objective,
 });
 
-// === Game clock placeholder ===
+// === Game clock ===
 let started = false;
-let clockMin = 21 * 60;
-function formatClock(totalMin: number): string {
-  const h24 = Math.floor(totalMin / 60) % 24;
-  const m = totalMin % 60;
-  const h12 = ((h24 + 11) % 12) + 1;
-  const period = h24 >= 12 && h24 < 24 ? 'PM' : 'AM';
-  return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+const gameClock = new GameClock(plot.assassinArrivalMinute);
+
+function paintClock() {
+  if (!clockEl) return;
+  clockEl.textContent = gameClock.formatted();
+  if (gameClock.state.inCombat) clockEl.style.borderColor = '#f44';
+  else clockEl.style.borderColor = '#555';
 }
-setInterval(() => {
-  if (!started) return;
-  clockMin++;
-  if (clockEl) clockEl.textContent = formatClock(clockMin);
-}, 2500);
+paintClock();
+
+gameClock.onTick = (e) => {
+  paintClock();
+  if (e.triggerWarning) console.log('[Long Watch] Half-hour warning — assassin draws near.');
+  if (e.triggerAssassin) console.log('[Long Watch] The assassin has arrived. (Combat hook pending Iter later.)');
+  if (e.triggerDawn) console.log('[Long Watch] Dawn breaks. The Heir survives.');
+};
+
+/** Track room entries to fire enter_room cost on threshold crossing. */
+let lastLandmarkId: string | null = null;
+function detectRoomEntry() {
+  if (!started || gameClock.state.inCombat || gameClock.state.done) return;
+  const pos = player.getPosition();
+  let nearest: string | null = null;
+  let nearestDist = Infinity;
+  for (const lm of Object.values(mansion.landmarks)) {
+    const dx = pos.x - (lm.x + 0.5);
+    const dz = pos.z - (lm.z + 0.5);
+    const expectedFloorY = lm.floor === 1 ? 1.5 : 6.5;
+    const dy = pos.y - expectedFloorY;
+    const d2 = dx * dx + dz * dz + dy * dy * 0.5;
+    if (d2 < nearestDist) { nearestDist = d2; nearest = lm.id; }
+  }
+  if (nearest && nearest !== lastLandmarkId && nearestDist < 50) {
+    lastLandmarkId = nearest;
+    gameClock.advance('enter_room');
+  }
+}
 
 startBtn?.addEventListener('click', () => {
   if (started) return;
@@ -127,7 +152,7 @@ window.addEventListener('resize', () => {
 });
 
 // Expose for debugging
-(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary };
+(window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock };
 
 let prevTime = performance.now();
 function animate() {
@@ -140,6 +165,8 @@ function animate() {
 
   physics.step(dt);
   player.update(dt);
+  gameClock.driftStep(dt);
+  detectRoomEntry();
   renderer.render(scene, camera);
 }
 animate();
