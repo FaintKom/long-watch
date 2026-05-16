@@ -17,6 +17,7 @@ import { rollDice, rollNd } from './character';
 import { CLASSES, ClassId, applyClass } from './classes';
 import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
+import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState } from './props';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -59,6 +60,25 @@ const castMembers: CastMember[] = (Object.keys(CAST) as CastId[]).map(id => new 
 
 // === Clue props ===
 const clueProps: CluePropInstance[] = buildClueProps(scene);
+
+// === Mansion props (chairs, bottles, plates, books, vases, etc.) ===
+const props: PropInstance[] = placeMansionProps(scene, physics);
+const worldState: PlayerWorldState = newPlayerWorldState();
+
+function nearestProp(): PropInstance | null {
+  const pos = player.getPosition();
+  let best: PropInstance | null = null;
+  let bestDist = 1.6;
+  for (const p of props) {
+    if (p.consumed && (p.kind === 'bottle_wine' || p.kind === 'bottle_brandy' || p.kind === 'plate_food' || p.kind === 'ruby_necklace')) continue;
+    const dx = pos.x - p.position.x;
+    const dz = pos.z - p.position.z;
+    const dy = pos.y - p.position.y;
+    const d = Math.sqrt(dx * dx + dz * dz + dy * dy * 0.5);
+    if (d < bestDist) { best = p; bestDist = d; }
+  }
+  return best;
+}
 
 function nearestClue(): CluePropInstance | null {
   const pos = player.getPosition();
@@ -365,12 +385,40 @@ function updateInteractHint() {
     interactHint.style.display = 'block';
     return;
   }
+  const prop = nearestProp();
+  if (prop) {
+    const verb = propActionVerb(prop);
+    interactHint.textContent = `[E] ${verb} ${prop.label}`;
+    interactHint.style.display = 'block';
+    return;
+  }
   const nearest = nearestCastMember();
   if (nearest) {
     interactHint.textContent = `[E] Speak with ${nearest.def.displayName}`;
     interactHint.style.display = 'block';
   } else {
     interactHint.style.display = 'none';
+  }
+}
+
+function propActionVerb(p: PropInstance): string {
+  switch (p.kind) {
+    case 'chair':              return 'Sit at';
+    case 'bottle_wine':
+    case 'bottle_brandy':      return 'Drink';
+    case 'plate_food':         return 'Eat from';
+    case 'book':               return 'Read';
+    case 'crate':              return 'Search';
+    case 'chest_locked':       return 'Pick lock on';
+    case 'ruby_necklace':      return 'Take';
+    case 'weapon_rack':        return 'Examine';
+    case 'cooking_pot':
+    case 'pots_kitchen':       return 'Inspect';
+    case 'candelabra':
+    case 'painting':
+    case 'vase':
+    case 'pillow':             return 'Examine';
+    default:                   return 'Use';
   }
 }
 
@@ -499,6 +547,13 @@ window.addEventListener('keydown', (e) => {
     const clue = nearestClue();
     if (clue) {
       examineClue(clue);
+      return;
+    }
+    const prop = nearestProp();
+    if (prop) {
+      const r = interactWithProp(prop, character, worldState, scene);
+      r.log.forEach(logCombat);
+      renderStats();
       return;
     }
     const cm = nearestCastMember();
