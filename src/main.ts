@@ -25,6 +25,7 @@ import { WorldFeed } from './events';
 import { Memory, formatMemoryForPrompt } from './memory';
 import { ConsequenceStore, formatFlagsForPrompt } from './consequences';
 import { buildCatacombs, Catacombs } from './catacombs';
+import { computeWitnesses, diffuseRumors } from './witnesses';
 import { isVisibleOnFloor } from './fov';
 import { setNavWorld } from './nav';
 import * as CANNON from 'cannon-es';
@@ -820,6 +821,9 @@ async function streamReply(message: string) {
     return;
   }
   cm.pushHistory('user', message);
+  // Player-told info: scoped to this NPC's memory so it sticks across the night,
+  // and so rumor diffusion can propagate it from this NPC to others on contact.
+  memory.addEvent(`[told by player] ${message.slice(0, 200)}`, gameClock.state.currentMinute, [cm.def.id]);
   gameClock.advance('ai_chat_turn');
 
   streamingReply = true;
@@ -973,6 +977,14 @@ window.addEventListener('keydown', (e) => {
       if (r.wasTheft && r.caught && r.theftOwner && r.theftOwner !== 'house' && r.theftOwner !== 'player') {
         reputation.caughtCount++;
         reputation.alarmed = true;
+        // Scope the "theft caught" flag to NPCs who actually saw it (and the owner).
+        const propPos = prop.position;
+        const ownerId = r.theftOwner as CastId;
+        const theftWitnesses = computeWitnesses(castMembers, {
+          pos: propPos, world, raycast: lineOfSight, coneAware: true, range: 8,
+          alwaysIncludes: [ownerId],
+        });
+        consequences.set(`theft_caught_from_${ownerId}`, true, gameClock.state.currentMinute, theftWitnesses);
         adjustRep(reputation, r.theftOwner as any, -40);
         logCombat(`Reputation with ${r.theftOwner} drops sharply.`);
         // Witness propagation: other NPCs within 6m also learn of the theft
@@ -1175,10 +1187,20 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   if (byPlayer && result.firstHitByPlayer) {
     adjustRep(reputation, cm.def.id as any, -50);
     reputation.alarmed = true;
+    // Scope: only NPCs who actually saw it know. Victim is always a witness.
+    const witnesses = computeWitnesses(castMembers, {
+      pos: { x: cm.body.position.x, y: cm.body.position.y, z: cm.body.position.z },
+      world,
+      raycast: lineOfSight,
+      coneAware: false, // an attack is loud - sound carries
+      alwaysIncludes: [cm.def.id],
+    });
+    // Household-alarmed flag still global (cries propagate), but the
+    // attacker-identity flag is scoped to actual witnesses.
     consequences.set('household_alarmed', true, gameClock.state.currentMinute);
-    consequences.set(`player_attacked_${cm.def.id}`, true, gameClock.state.currentMinute);
+    consequences.set(`player_attacked_${cm.def.id}`, true, gameClock.state.currentMinute, witnesses);
     consequences.inc('cast_npcs_attacked_by_player', 1, gameClock.state.currentMinute);
-    dispatchOffscreenBeat(`player_attacked_${cm.def.id}`);
+    dispatchOffscreenBeat(`player_attacked_${cm.def.id}`, witnesses);
     // Tank faction relationship — fletcher_house now hostile to player_party
     adjustAttitude(factionRel, 'fletcher_house', 'player_party', -40);
     adjustAttitude(factionRel, 'player_party', 'fletcher_house', -40);
@@ -1207,18 +1229,38 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   }
 }
 
+// --- NPC-to-NPC rumor diffusion ---
+let rumorClock = 0;
+function tickRumorDiffusion(dt: number): void {
+  rumorClock += dt;
+  if (rumorClock < 3.0) return; // every 3 real seconds
+  rumorClock = 0;
+  if (castMembers.length === 0) return;
+  diffuseRumors({
+    cast: castMembers,
+    world,
+    raycast: lineOfSight,
+    pushEvent: (text, minute, visibility) => { memory.addEvent(text, minute, visibility); },
+    eventsVisibleTo: (id, count) => memory.feed.recentFor(id, count),
+    currentMinute: gameClock.state.currentMinute,
+  });
+}
+
 // --- Off-screen NPC beats (Bobby-Gray pattern #5) ---
 let beatInFlight = false;
 /**
- * Ask Groq for one short third-person action per active NPC and push them as
- * NPC-scoped memory events. Fire-and-forget. Triggered at major milestones
- * (warning, assassin arrival, first-attack, catacombs entry).
+ * Ask Groq for one short third-person action per witnessing NPC and push them as
+ * NPC-scoped memory events. Fire-and-forget. Witness set defaults to ALL active
+ * NPCs (manor-wide events like dawn / clock chime); pass a narrower CastId[] for
+ * scoped events so only NPCs who actually saw it react.
  */
-function dispatchOffscreenBeat(beatLabel: string): void {
+function dispatchOffscreenBeat(beatLabel: string, witnessIds?: CastId[]): void {
   if (beatInFlight) return;
   beatInFlight = true;
-  const activeNpcs = castMembers
-    .filter((cm) => !cm.isDead)
+  const alive = castMembers.filter((cm) => !cm.isDead);
+  const filter = witnessIds ? new Set(witnessIds) : null;
+  const activeNpcs = alive
+    .filter((cm) => filter === null || filter.has(cm.def.id))
     .map((cm) => ({
       id: cm.def.id,
       displayName: cm.def.displayName,
@@ -1226,6 +1268,7 @@ function dispatchOffscreenBeat(beatLabel: string): void {
       positionTonight: cm.def.persona.positionTonight ?? '',
       motivation: cm.def.persona.motivation ?? '',
     }));
+  if (activeNpcs.length === 0) { beatInFlight = false; return; }
   const flagsBlock = formatFlagsForPrompt(consequences.all());
   fetch('/api/npc-beat', {
     method: 'POST',
@@ -1263,8 +1306,13 @@ function enterCatacombs() {
   if (inCatacombs) return;
   inCatacombs = true;
   logCombat('You descend through the trapdoor into damp stone.');
-  consequences.set('entered_catacombs', true, gameClock.state.currentMinute);
-  dispatchOffscreenBeat('player_descended_catacombs');
+  // Only NPCs near the storage-room trapdoor "see" the descent.
+  const trapdoorPos = { x: 44, y: 1.05, z: 27 };
+  const witnesses = computeWitnesses(castMembers, {
+    pos: trapdoorPos, world, raycast: lineOfSight, coneAware: false, range: 10,
+  });
+  consequences.set('entered_catacombs', true, gameClock.state.currentMinute, witnesses.length > 0 ? witnesses : 'public');
+  dispatchOffscreenBeat('player_descended_catacombs', witnesses.length > 0 ? witnesses : undefined);
   // Hide the mansion mesh and freeze cast meshes so they don't render below.
   world.group.visible = false;
   for (const cm of castMembers) cm.group.visible = false;
@@ -1551,6 +1599,7 @@ function animate() {
   updateThrowables(dt);
   checkCatacombsExit();
   tickCatacombsEnemies(dt);
+  tickRumorDiffusion(dt);
 
   // === Cast AI ===
   tickCastAi(dt);
