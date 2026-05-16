@@ -19,6 +19,7 @@
     "dice-typescript": "^1.6.1",
     "fantastical": "^2.0.1",
     "labyrinthos": "^1.1.2",
+    "replicate": "^1.4.0",
     "rot-js": "^2.2.1",
     "seedrandom": "^3.0.5",
     "three": "^0.177.0",
