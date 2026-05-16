@@ -10,11 +10,13 @@ import { Character } from './character';
 import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
 import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES, BOSSES } from './plot';
 import { GameClock } from './clock';
-import { CAST, CastMember, CastId } from './cast';
+import { CAST, CastMember, CastId, applyPlotContext } from './cast';
 import { Enemy } from './enemy';
 import { spawnAssassin, SpawnedAssassinGroup } from './assassin';
 import { rollDice, rollNd } from './character';
 import { CLASSES, ClassId, applyClass } from './classes';
+import { buildClueProps, attemptClue, CluePropInstance } from './clues';
+import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -54,6 +56,23 @@ scene.add(player.yaw);
 
 // === Cast members ===
 const castMembers: CastMember[] = (Object.keys(CAST) as CastId[]).map(id => new CastMember(CAST[id], scene, physics));
+
+// === Clue props ===
+const clueProps: CluePropInstance[] = buildClueProps(scene);
+
+function nearestClue(): CluePropInstance | null {
+  const pos = player.getPosition();
+  let best: CluePropInstance | null = null;
+  let bestDist = 2.0;
+  for (const c of clueProps) {
+    const dx = pos.x - c.mesh.position.x;
+    const dz = pos.z - c.mesh.position.z;
+    const dy = pos.y - c.mesh.position.y;
+    const d = Math.sqrt(dx * dx + dz * dz + dy * dy * 0.5);
+    if (d < bestDist) { best = c; bestDist = d; }
+  }
+  return best;
+}
 
 // === Character + class picker ===
 const character = new Character('Adventurer');
@@ -98,6 +117,7 @@ renderStats();
 
 // === Plot: roll the night ===
 const plot = rollPlot();
+applyPlotContext(CAST, plot.twists, plot.boss); // mutate cast personas based on rolled plot
 const playerId = 'player-1';
 const partyObjectives = rollObjectivesForParty([playerId]);
 const myObjective = partyObjectives[0];
@@ -183,15 +203,125 @@ function detectRoomEntry() {
   }
 }
 
+let resourcePool: ResourcePool = newResourcePool(chosenClass);
+let learnedSpells: string[] = STARTING_SPELLS[chosenClass];
+/** Index of currently selected spell for cast. */
+let activeSpellIdx = 0;
+
 startBtn?.addEventListener('click', () => {
   if (started) return;
   applyClass(character, CLASSES[chosenClass]);
   character.name = CLASSES[chosenClass].name;
+  resourcePool = newResourcePool(chosenClass);
+  learnedSpells = STARTING_SPELLS[chosenClass];
+  activeSpellIdx = 0;
   renderStats();
+  renderActionBar();
   started = true;
   startScreen!.style.display = 'none';
   renderer.domElement.requestPointerLock();
 });
+
+function renderActionBar() {
+  const bar = document.getElementById('action-bar');
+  if (!bar) return;
+  const buttons: { key: string; name: string; meta: string; disabled: boolean; onclick: () => void }[] = [];
+
+  if (chosenClass === 'fighter') {
+    buttons.push({
+      key: 'Y', name: 'Second Wind', meta: `${resourcePool.secondWindLeft}/1`,
+      disabled: resourcePool.secondWindLeft <= 0,
+      onclick: () => { const r = secondWind(resourcePool, character); r.log.forEach(logCombat); renderStats(); renderActionBar(); },
+    });
+    buttons.push({
+      key: 'U', name: 'Action Surge', meta: `${resourcePool.actionSurgeLeft}/1`,
+      disabled: resourcePool.actionSurgeLeft <= 0,
+      onclick: () => { const r = actionSurge(resourcePool); r.log.forEach(logCombat); renderActionBar(); },
+    });
+  }
+  if (chosenClass === 'rogue') {
+    buttons.push({
+      key: 'B', name: 'Cunning Action', meta: 'bonus',
+      disabled: false,
+      onclick: () => { const r = cunningAction(); r.log.forEach(logCombat); },
+    });
+    buttons.push({
+      key: 'V', name: 'Sneak Attack', meta: 'on hit',
+      disabled: false,
+      onclick: () => { logCombat('Sneak Attack readied — your next hit with advantage adds 2d6.'); sneakReady = true; },
+    });
+  }
+  if (chosenClass === 'cleric') {
+    buttons.push({
+      key: 'Y', name: 'Turn Undead', meta: `${resourcePool.channelDivinityLeft}/1`,
+      disabled: resourcePool.channelDivinityLeft <= 0,
+      onclick: () => {
+        const enemies = assassinGroup ? assassinGroup.enemies.filter(e => !e.isDead) : [];
+        const r = channelDivinityTurnUndead(resourcePool, character, enemies);
+        r.log.forEach(logCombat);
+        renderActionBar();
+      },
+    });
+  }
+
+  // Spells for wizard/cleric
+  for (let i = 0; i < learnedSpells.length; i++) {
+    const sp = SPELLS[learnedSpells[i]];
+    if (!sp) continue;
+    const key = (i + 1).toString();
+    const slotInfo = sp.level === 0 ? 'cantrip' : `L${sp.level} (${resourcePool.spellSlots[sp.level - 1] ?? 0}/${resourcePool.spellSlotsMax[sp.level - 1] ?? 0})`;
+    buttons.push({
+      key, name: sp.name, meta: slotInfo,
+      disabled: sp.level > 0 && (resourcePool.spellSlots[sp.level - 1] ?? 0) <= 0,
+      onclick: () => castSpellByIndex(i),
+    });
+  }
+
+  let html = '';
+  for (const b of buttons) {
+    html += `<button class="ab-btn${b.disabled ? ' disabled' : ''}" data-id="${b.name}">` +
+      `<span class="ab-key">${b.key}</span>` +
+      `<span class="ab-name">${b.name}</span>` +
+      `<span class="ab-meta">${b.meta}</span>` +
+      `</button>`;
+  }
+  bar.innerHTML = html;
+  const btns = bar.querySelectorAll('.ab-btn');
+  buttons.forEach((b, i) => {
+    btns[i]?.addEventListener('click', () => { if (!b.disabled) b.onclick(); });
+  });
+}
+
+let sneakReady = false;
+
+function castSpellByIndex(idx: number) {
+  const id = learnedSpells[idx];
+  if (!id) return;
+  const sp = SPELLS[id];
+  if (!sp) return;
+  // Find nearest enemy as target if there is combat
+  let target = null as null | import('./enemy').Enemy;
+  if (assassinGroup) {
+    const pos = player.getPosition();
+    let bestDist = 20;
+    for (const en of assassinGroup.enemies) {
+      if (en.isDead) continue;
+      const dx = en.body.position.x - pos.x;
+      const dz = en.body.position.z - pos.z;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (d < bestDist) { target = en; bestDist = d; }
+    }
+  }
+  const result = sp.cast(character, resourcePool, target);
+  result.log.forEach(logCombat);
+  if (target && target.isDead) {
+    logCombat(`${target.preset.name} falls.`);
+    target.destroy(scene, physics);
+    if (assassinGroup && assassinGroup.enemies.every(e => e.isDead)) triggerEnding('assassin_defeated');
+  }
+  renderStats();
+  renderActionBar();
+}
 
 renderer.domElement.addEventListener('click', () => {
   if (started && !document.pointerLockElement) renderer.domElement.requestPointerLock();
@@ -227,6 +357,12 @@ function nearestCastMember(): CastMember | null {
 function updateInteractHint() {
   if (!started || inDialogueWith) {
     interactHint.style.display = 'none';
+    return;
+  }
+  const clue = nearestClue();
+  if (clue) {
+    interactHint.textContent = `[E] Examine ${clue.def.label}`;
+    interactHint.style.display = 'block';
     return;
   }
   const nearest = nearestCastMember();
@@ -360,10 +496,55 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.code === 'KeyE') {
+    const clue = nearestClue();
+    if (clue) {
+      examineClue(clue);
+      return;
+    }
     const cm = nearestCastMember();
     if (cm) openDialogue(cm);
   }
+  if (e.code === 'KeyY') {
+    if (chosenClass === 'fighter') {
+      const r = secondWind(resourcePool, character); r.log.forEach(logCombat); renderStats(); renderActionBar();
+    } else if (chosenClass === 'cleric') {
+      const enemies = assassinGroup ? assassinGroup.enemies.filter(en => !en.isDead) : [];
+      const r = channelDivinityTurnUndead(resourcePool, character, enemies); r.log.forEach(logCombat); renderActionBar();
+    }
+  }
+  if (e.code === 'KeyU' && chosenClass === 'fighter') {
+    const r = actionSurge(resourcePool); r.log.forEach(logCombat); renderActionBar();
+  }
+  if (e.code === 'KeyV' && chosenClass === 'rogue') {
+    sneakReady = true; logCombat('Sneak Attack readied.');
+  }
+  if (e.code === 'KeyB' && chosenClass === 'rogue') {
+    const r = cunningAction(); r.log.forEach(logCombat);
+  }
+  // Spell hotkeys 1-9
+  if (e.code.startsWith('Digit')) {
+    const idx = parseInt(e.code.slice(5)) - 1;
+    if (idx >= 0 && idx < learnedSpells.length) castSpellByIndex(idx);
+  }
+  if (e.code === 'F5') { e.preventDefault(); saveGame(); }
+  if (e.code === 'F9') { e.preventDefault(); loadGame(); }
 });
+
+function examineClue(c: CluePropInstance) {
+  if (c.attempted) {
+    logCombat(`(${c.def.label}: already examined)`);
+    return;
+  }
+  c.attempted = true;
+  gameClock.advance('investigate');
+  const res = attemptClue(c.def, character, plot);
+  logCombat(`${c.def.label}: ${c.def.flavorOnFind}`);
+  logCombat(`Roll ${res.roll} (total ${res.total}) vs DC ${c.def.check.dc}: ${res.passed ? 'PASS' : 'FAIL'} - ${res.text}`);
+  if (res.revealedBoss) {
+    logCombat(`*** You have proven the Boss. ***`);
+    renderObjectiveCard();
+  }
+}
 
 // LMB to attack nearest enemy in reach
 const PLAYER_MELEE_REACH = 2.0;
@@ -388,9 +569,14 @@ window.addEventListener('mousedown', (e) => {
   const total = roll + 5; // +3 STR +2 prof for Lv4 fighter equiv
   if (roll === 1) { logCombat('You miss wildly!'); return; }
   if (roll === 20 || total >= target.preset.ac) {
-    const dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3; // longsword + STR
-    target.takeHit(dmg);
-    logCombat(`You hit ${target.preset.name} for ${dmg} damage.${roll === 20 ? ' CRITICAL!' : ''}`);
+    let dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3; // longsword + STR
+    let sneakDmg = 0;
+    if (chosenClass === 'rogue' && sneakReady) {
+      sneakDmg = sneakAttackDamage(character);
+      sneakReady = false;
+    }
+    target.takeHit(dmg + sneakDmg);
+    logCombat(`You hit ${target.preset.name} for ${dmg + sneakDmg} damage${sneakDmg ? ` (incl. ${sneakDmg} sneak)` : ''}.${roll === 20 ? ' CRITICAL!' : ''}`);
     if (target.isDead) {
       logCombat(`${target.preset.name} falls.`);
       target.destroy(scene, physics);
@@ -436,6 +622,168 @@ function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player
 (window as any).__triggerEnding = triggerEnding;
 
 document.getElementById('end-restart')?.addEventListener('click', () => window.location.reload());
+
+// === Save / Load ===
+const SAVE_KEY = 'long-watch-save-v1';
+function saveGame() {
+  if (!started) return;
+  try {
+    const data = {
+      version: 1,
+      chosenClass,
+      character: {
+        name: character.name,
+        level: character.level,
+        hp: character.hp,
+        maxHp: character.maxHp,
+        ac: character.ac,
+        stats: { ...character.stats },
+      },
+      pool: resourcePool,
+      learnedSpells,
+      plot: {
+        ...plot,
+        revealed: { ...plot.revealed },
+      },
+      clockMinute: gameClock.state.currentMinute,
+      assassinSpawned: !!assassinGroup,
+      assassinIds: assassinGroup ? assassinGroup.enemies.map(e => ({ kind: e.kind, hp: e.character.hp, x: e.body.position.x, y: e.body.position.y, z: e.body.position.z, dead: e.isDead })) : [],
+      pos: { x: player.body.position.x, y: player.body.position.y, z: player.body.position.z, yaw: player.yawAngle, pitch: player.pitch },
+      clueAttempted: clueProps.map(c => ({ id: c.def.id, attempted: c.attempted })),
+      log: combatLog.slice(-30),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    logCombat('Game saved.');
+  } catch (err) {
+    logCombat('Save failed.');
+  }
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) { logCombat('No save found.'); return; }
+    const data = JSON.parse(raw);
+    if (data.version !== 1) { logCombat('Save version mismatch.'); return; }
+    sessionStorage.setItem('__pendingLoad', raw);
+    window.location.reload();
+  } catch (err) {
+    logCombat('Load failed.');
+  }
+}
+
+function applyPendingLoad() {
+  const raw = sessionStorage.getItem('__pendingLoad');
+  if (!raw) return false;
+  sessionStorage.removeItem('__pendingLoad');
+  try {
+    const data = JSON.parse(raw);
+    chosenClass = data.chosenClass;
+    applyClass(character, CLASSES[chosenClass]);
+    character.name = data.character.name;
+    character.hp = data.character.hp;
+    character.maxHp = data.character.maxHp;
+    character.ac = data.character.ac;
+    character.level = data.character.level;
+    character.stats = data.character.stats;
+    resourcePool = data.pool;
+    learnedSpells = data.learnedSpells;
+    Object.assign(plot, data.plot);
+    plot.revealed = { ...data.plot.revealed };
+    gameClock.setMinute(data.clockMinute);
+    player.setPosition(data.pos.x, data.pos.y, data.pos.z);
+    player.yawAngle = data.pos.yaw;
+    player.pitch = data.pos.pitch;
+    for (const c of clueProps) {
+      const saved = data.clueAttempted.find((x: any) => x.id === c.def.id);
+      if (saved) c.attempted = saved.attempted;
+    }
+    for (const line of data.log) combatLog.push(line);
+    renderStats();
+    renderActionBar();
+    renderObjectiveCard();
+    started = true;
+    startScreen!.style.display = 'none';
+    setTimeout(() => renderer.domElement.requestPointerLock(), 200);
+    logCombat('Game loaded.');
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+// === Mobile touch controls ===
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const mobileControls = document.getElementById('mobile-controls');
+if (isMobile && mobileControls) mobileControls.classList.add('active');
+
+function setupTouchControls() {
+  const stick = document.getElementById('mc-move');
+  const nub = document.getElementById('mc-move-nub');
+  const look = document.getElementById('mc-look');
+  const atk = document.getElementById('mc-attack');
+  const inter = document.getElementById('mc-interact');
+  const jmp = document.getElementById('mc-jump');
+
+  if (stick && nub) {
+    let stickStart: { x: number; y: number } | null = null;
+    stick.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      const rect = stick.getBoundingClientRect();
+      stickStart = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    stick.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!stickStart) return;
+      const t = e.touches[0];
+      const dx = t.clientX - stickStart.x;
+      const dy = t.clientY - stickStart.y;
+      const mag = Math.min(50, Math.sqrt(dx * dx + dy * dy));
+      const ang = Math.atan2(dy, dx);
+      (nub as HTMLElement).style.transform = `translate(calc(-50% + ${Math.cos(ang) * mag}px), calc(-50% + ${Math.sin(ang) * mag}px))`;
+      (player as any).keys['KeyW'] = dy < -10;
+      (player as any).keys['KeyS'] = dy > 10;
+      (player as any).keys['KeyA'] = dx < -10;
+      (player as any).keys['KeyD'] = dx > 10;
+    });
+    const stop = (e: TouchEvent) => {
+      e.preventDefault();
+      stickStart = null;
+      (nub as HTMLElement).style.transform = 'translate(-50%, -50%)';
+      (player as any).keys['KeyW'] = (player as any).keys['KeyS'] = (player as any).keys['KeyA'] = (player as any).keys['KeyD'] = false;
+    };
+    stick.addEventListener('touchend', stop);
+    stick.addEventListener('touchcancel', stop);
+  }
+  if (look) {
+    let last: { x: number; y: number } | null = null;
+    look.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      last = { x: t.clientX, y: t.clientY };
+    });
+    look.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!last) return;
+      const t = e.touches[0];
+      const dx = t.clientX - last.x;
+      const dy = t.clientY - last.y;
+      player.yawAngle -= dx * 0.005;
+      player.pitch -= dy * 0.005;
+      player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
+      last = { x: t.clientX, y: t.clientY };
+    });
+    look.addEventListener('touchend', (e) => { e.preventDefault(); last = null; });
+  }
+  atk?.addEventListener('touchstart', (e) => { e.preventDefault(); window.dispatchEvent(new MouseEvent('mousedown', { button: 0 })); });
+  inter?.addEventListener('touchstart', (e) => { e.preventDefault(); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' })); });
+  jmp?.addEventListener('touchstart', (e) => { e.preventDefault(); (player as any).keys['Space'] = true; setTimeout(() => (player as any).keys['Space'] = false, 200); });
+}
+setupTouchControls();
+
+// Run any pending load (after F9 reload)
+setTimeout(applyPendingLoad, 0);
 
 // Expose for debugging
 (window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers };

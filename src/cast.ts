@@ -8,6 +8,8 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
 
+import { TwistId, BossId } from './plot';
+
 export type CastId = 'matriarch' | 'heir' | 'right_hand' | 'cook' | 'butler' | 'maid' | 'gardener';
 
 export interface CastPersona {
@@ -235,5 +237,77 @@ export class CastMember {
   pushHistory(role: 'user' | 'assistant', content: string) {
     this.history.push({ role, content });
     if (this.history.length > 10) this.history.shift();
+  }
+}
+
+/**
+ * Mutate cast personas in place based on plot rolls.
+ * The Heir is most affected; the Right Hand has subtle shifts based on whether he is the Boss.
+ */
+export function applyPlotContext(cast: typeof CAST, twists: TwistId[], boss: BossId): void {
+  // Heir variants
+  const heir = cast.heir.persona;
+  if (twists.includes('heir_is_dragon')) {
+    heir.persona +=
+      ' SECRET (in character): you are actually a polymorphed blue dragon wyrmling. ' +
+      'You can keep human form indefinitely as long as you concentrate. You and your mother built Fletcher Mercantile together.';
+    heir.knownFacts +=
+      '\n- (Hidden) You are a dragon. Your mother is the only other one who knows.\n' +
+      '- (Hidden) Your fortune comes partly from dragon instincts: a nose for value.';
+    heir.hiddenFacts +=
+      '\n- NEVER admit you are a dragon directly. Deflect ("Strange question to ask a young man.").\n' +
+      '- If pressed with arcane evidence or magical truth-finding, you may slip a hint ("My mother says I have... unusual focus.").';
+    heir.speechStyle += ' Occasionally pauses oddly mid-sentence, as if listening for something far away.';
+  }
+  if (twists.includes('heir_is_daughter')) {
+    heir.persona = heir.persona.replace('Wallace Fletcher, late teens, the Heir. Reedy young man',
+      'Wallace Fletcher, late teens, the Heir, presenting as a young man — though in fact a young woman. Reedy figure');
+    heir.knownFacts +=
+      '\n- (Hidden) Your real name is Walla. You present as Wallace because your mother believed a son would be safer to inherit.\n' +
+      '- (Hidden) Only you and your mother know.';
+    heir.hiddenFacts +=
+      '\n- NEVER directly confirm you are a woman, even if asked. Deflect with "What an odd thing to ask."\n' +
+      '- Subtle tells are okay: nervously adjusting clothes, voice catching, certain mannerisms.';
+  }
+  if (twists.includes('poisoned_heir')) {
+    heir.persona += ' You feel unwell tonight. Something you ate, perhaps. You hide it from your mother.';
+    heir.knownFacts += '\n- (Hidden) You feel light-headed and feverish but blame the wine.';
+    heir.hiddenFacts += '\n- You do not know you have been poisoned. Mention only vague symptoms if asked about your health.';
+    heir.speechStyle += ' Occasionally trails off mid-sentence, swallows, or wipes brow.';
+  }
+  if (twists.includes('fake_death')) {
+    heir.persona += ' SECRET: you have been seduced by the Sea Cult and plan to stage your own death tonight to escape the household.';
+    heir.knownFacts += '\n- (Hidden) You will pretend to die when chaos breaks out, then slip away to the cult.\n- (Hidden) You hide a Cult symbol under your shirt.';
+    heir.hiddenFacts += '\n- NEVER directly admit this plan, even under pressure. Deflect by sounding scared/nervous, which fits your normal demeanor.';
+  }
+  if (twists.includes('assassin_kin')) {
+    // doesn't affect heir, affects party — leave for now
+  }
+
+  // Matriarch variant: doppelganger
+  if (twists.includes('doppelganger_matriarch')) {
+    const m = cast.matriarch.persona;
+    m.persona =
+      'You are a doppelganger that has replaced Magrath Fletcher 3 days ago. You imitate her perfectly but you do not know all her history. ' +
+      'You can read surface thoughts. You may ask the player oddly specific questions ("And what brings you to mind at this moment?"). ' +
+      'You delay paying or argue cost when possible. If exposed, you will try to flee or barter, not fight.';
+    m.knownFacts =
+      '- You know Magrath\'s daily routine, staff names, broad outline of her business.\n' +
+      '- You can read the player\'s surface thoughts (work this into dialogue subtly).\n' +
+      '- The real Magrath is held captive in the secret passage beneath the storage room (you have not killed her).';
+    m.hiddenFacts =
+      '- NEVER admit you are a doppelganger.\n' +
+      '- If asked about specific past events (e.g. "what was your husband\'s middle name?"), evade or invent a vague answer.\n' +
+      '- You do NOT know who hired YOU — your handler gave you the contract sealed.\n' +
+      '- If pressed with magical truth-detection or specific past facts, you may panic and break character — describe physical tells in dialogue (a twitch, a long pause).';
+    m.speechStyle = 'Imitates Magrath\'s style but slightly off: vocabulary just-so, a beat too long before sentimental answers. Asks "what\'s on your mind?" too often.';
+  }
+
+  // Right Hand variant when HE is the Boss
+  if (boss === 'right_hand') {
+    const rh = cast.right_hand.persona;
+    rh.persona += ' SECRET: you ARE the Boss. You hired the assassin because you believe Magrath\'s reign has corrupted the city. You do this for justice, not gold.';
+    rh.knownFacts += '\n- (Hidden) You are the Boss. You hired the assassin.';
+    rh.hiddenFacts += '\n- NEVER admit this directly. Subtle tells: you pause oddly when asked about loyalty, you may probe the player for sympathy ("Do you ever wonder if she\'s gone too far?"), you avoid Magrath physically tonight when you can.';
   }
 }

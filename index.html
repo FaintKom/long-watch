@@ -172,6 +172,63 @@
       border: 2px solid #fc4; border-radius: 4px;
       font-family: inherit; font-size: 16px; cursor: pointer; letter-spacing: 2px;
     }
+
+    #action-bar {
+      position: absolute; bottom: 16px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 6px;
+      background: rgba(10,10,15,0.92);
+      border: 1px solid #553; border-radius: 6px;
+      padding: 6px;
+      pointer-events: auto;
+      z-index: 30;
+    }
+    .ab-btn {
+      width: 78px; padding: 6px 4px;
+      background: rgba(40,30,15,0.9); border: 1px solid #553;
+      border-radius: 4px; color: #ddd; font-size: 11px;
+      font-family: inherit; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; line-height: 1.2;
+    }
+    .ab-btn:hover { border-color: #fc4; }
+    .ab-btn.disabled { opacity: 0.35; cursor: not-allowed; }
+    .ab-btn .ab-key { color: #fc4; font-weight: bold; }
+    .ab-btn .ab-name { font-size: 12px; }
+    .ab-btn .ab-meta { color: #888; font-size: 10px; margin-top: 2px; }
+
+    #mobile-controls {
+      position: fixed; inset: 0;
+      pointer-events: none; display: none;
+      z-index: 25;
+    }
+    #mobile-controls.active { display: block; }
+    .mc-stick {
+      position: absolute; left: 24px; bottom: 100px;
+      width: 140px; height: 140px;
+      background: rgba(40,30,10,0.4); border: 2px solid #553;
+      border-radius: 50%; pointer-events: auto;
+    }
+    .mc-stick .mc-nub {
+      position: absolute; left: 50%; top: 50%;
+      width: 60px; height: 60px;
+      transform: translate(-50%, -50%);
+      background: rgba(252,196,68,0.6); border-radius: 50%;
+    }
+    .mc-look {
+      position: absolute; right: 24px; bottom: 100px;
+      width: 140px; height: 140px;
+      background: rgba(40,30,10,0.4); border: 2px solid #553;
+      border-radius: 50%; pointer-events: auto;
+    }
+    .mc-btn {
+      position: absolute; right: 30px; width: 56px; height: 56px;
+      background: rgba(60,30,15,0.8); border: 2px solid #fc4;
+      border-radius: 8px; color: #fc4; font-size: 14px; font-weight: bold;
+      text-align: center; line-height: 56px; pointer-events: auto;
+    }
+    .mc-btn.attack { bottom: 260px; }
+    .mc-btn.interact { bottom: 200px; }
+    .mc-btn.jump { right: 100px; bottom: 200px; }
   </style>
 </head>
 <body>
@@ -202,6 +259,15 @@
   </div>
   <div id="dialogue-panel"></div>
   <div id="combat-log"></div>
+  <div id="action-bar"></div>
+
+  <div id="mobile-controls">
+    <div class="mc-stick" id="mc-move"><div class="mc-nub" id="mc-move-nub"></div></div>
+    <div class="mc-look" id="mc-look"></div>
+    <div class="mc-btn attack" id="mc-attack">ATK</div>
+    <div class="mc-btn interact" id="mc-interact">E</div>
+    <div class="mc-btn jump" id="mc-jump">↑</div>
+  </div>
 
   <div id="end-screen">
     <h1 id="end-title">DAWN</h1>
