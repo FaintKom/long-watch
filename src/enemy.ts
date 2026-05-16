@@ -8,6 +8,7 @@ import { Character, rollDice, rollAttackDamage } from './character';
 import { FactionId } from './faction';
 import { tryUpgradeWithVox, VOX_KEYS } from './voxModels';
 import { getMonster, firstMeleeAttackFormula, firstAttackBonus, srdAC } from './srd';
+import { Navigator } from './nav';
 
 export type EnemyKind =
   | 'mook' | 'cultist' | 'priest' | 'fanatic' | 'giant_toad'
@@ -94,6 +95,7 @@ export class Enemy {
   isDead = false;
   faction: FactionId = 'freelance';
   private moveTimer = 0;
+  private nav = new Navigator();
 
   constructor(kind: EnemyKind, x: number, y: number, z: number, scene: THREE.Scene, physics: PhysicsWorld) {
     this.kind = kind;
@@ -181,8 +183,11 @@ export class Enemy {
 
     if (dist > this.preset.reach * 0.9) {
       const v = this.preset.speed * 0.4;
-      this.body.velocity.x = (dx / Math.max(dist, 0.01)) * v;
-      this.body.velocity.z = (dz / Math.max(dist, 0.01)) * v;
+      const steer = this.nav.steerToward(this.body.position, playerPos, Math.floor(this.body.position.y - 0.5));
+      const useDx = steer ? steer.dx : dx / Math.max(dist, 0.01);
+      const useDz = steer ? steer.dz : dz / Math.max(dist, 0.01);
+      this.body.velocity.x = useDx * v;
+      this.body.velocity.z = useDz * v;
     } else {
       this.body.velocity.x = 0;
       this.body.velocity.z = 0;

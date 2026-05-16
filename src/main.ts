@@ -23,6 +23,7 @@ import { defaultRelationships, isHostile, adjustAttitude } from './faction';
 import { Companion, KARLA } from './companion';
 import { WorldFeed, formatEventsForPrompt } from './events';
 import { isVisibleOnFloor } from './fov';
+import { setNavWorld } from './nav';
 import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
@@ -55,6 +56,8 @@ const world = new VoxelWorld(MAP_W, MAP_H, MAP_D);
 const physics = new PhysicsWorld();
 const mansion = buildMansion(world, physics, scene);
 scene.add(world.group);
+// Register the world for NPC A* navigation (cast.ts / enemy.ts / companion.ts).
+setNavWorld(world);
 
 // === Player ===
 const player = new Player(camera, physics, world);

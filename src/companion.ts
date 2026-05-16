@@ -8,6 +8,7 @@ import { Character, rollDice, rollAttackDamage } from './character';
 import { Enemy } from './enemy';
 import { FactionId } from './faction';
 import { tryUpgradeWithVox, VOX_KEYS } from './voxModels';
+import { Navigator } from './nav';
 
 export interface CompanionDef {
   id: string;
@@ -35,6 +36,7 @@ export class Companion {
   private attackTimer = 0;
   private followDist = 2.5;
   private maxFollowDist = 12;
+  private nav = new Navigator();
 
   constructor(def: CompanionDef, x: number, y: number, z: number, scene: THREE.Scene, physics: PhysicsWorld) {
     this.def = def;
@@ -117,8 +119,11 @@ export class Companion {
         return null;
       } else if (nearestDist > reach * 0.9) {
         const v = this.def.combatStats.speed * 0.5;
-        this.body.velocity.x = (dx / Math.max(nearestDist, 0.01)) * v;
-        this.body.velocity.z = (dz / Math.max(nearestDist, 0.01)) * v;
+        const steer = this.nav.steerToward(me, nearestEnemy.body.position, Math.floor(me.y - 0.5));
+        const useDx = steer ? steer.dx : dx / Math.max(nearestDist, 0.01);
+        const useDz = steer ? steer.dz : dz / Math.max(nearestDist, 0.01);
+        this.body.velocity.x = useDx * v;
+        this.body.velocity.z = useDz * v;
       } else {
         this.body.velocity.x = 0; this.body.velocity.z = 0;
       }
@@ -135,9 +140,12 @@ export class Companion {
     }
     if (d > this.followDist) {
       const v = 3.5;
-      this.body.velocity.x = (dx / d) * v;
-      this.body.velocity.z = (dz / d) * v;
-      this.group.rotation.y = Math.atan2(dx, dz);
+      const steer = this.nav.steerToward(me, playerPos, Math.floor(me.y - 0.5));
+      const useDx = steer ? steer.dx : dx / d;
+      const useDz = steer ? steer.dz : dz / d;
+      this.body.velocity.x = useDx * v;
+      this.body.velocity.z = useDz * v;
+      this.group.rotation.y = Math.atan2(useDx, useDz);
     } else {
       this.body.velocity.x = 0; this.body.velocity.z = 0;
     }

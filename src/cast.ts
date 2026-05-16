@@ -10,6 +10,7 @@ import { PhysicsWorld } from './physics';
 import { Character } from './character';
 import { FactionId } from './faction';
 import { tryUpgradeWithVox, VOX_KEYS } from './voxModels';
+import { Navigator } from './nav';
 
 import { TwistId, BossId } from './plot';
 
@@ -438,6 +439,7 @@ export class CastMember {
   /** Tick timer used by AI states. */
   aiTimer = 0;
   faction: FactionId = 'fletcher_house';
+  private nav = new Navigator();
 
   constructor(def: CastDef, scene: THREE.Scene, physics: PhysicsWorld) {
     this.def = def;
@@ -533,9 +535,12 @@ export class CastMember {
         return;
       }
       const v = this.def.combatStats.speed * 0.5;
-      this.body.velocity.x = (dx / dist) * v;
-      this.body.velocity.z = (dz / dist) * v;
-      this.group.rotation.y = Math.atan2(dx, dz);
+      const steer = this.nav.steerToward(me, fleeAnchor, Math.floor(me.y - 0.5));
+      const useDx = steer ? steer.dx : dx / dist;
+      const useDz = steer ? steer.dz : dz / dist;
+      this.body.velocity.x = useDx * v;
+      this.body.velocity.z = useDz * v;
+      this.group.rotation.y = Math.atan2(useDx, useDz);
       return;
     }
 
@@ -565,8 +570,11 @@ export class CastMember {
         this.body.velocity.x = 0; this.body.velocity.z = 0;
       } else if (bestDist > reach * 0.9) {
         const v = this.def.combatStats.speed * 0.5;
-        this.body.velocity.x = (dx / Math.max(bestDist, 0.01)) * v;
-        this.body.velocity.z = (dz / Math.max(bestDist, 0.01)) * v;
+        const steer = this.nav.steerToward(me, target.pos, Math.floor(me.y - 0.5));
+        const useDx = steer ? steer.dx : dx / Math.max(bestDist, 0.01);
+        const useDz = steer ? steer.dz : dz / Math.max(bestDist, 0.01);
+        this.body.velocity.x = useDx * v;
+        this.body.velocity.z = useDz * v;
       } else {
         this.body.velocity.x = 0; this.body.velocity.z = 0;
       }

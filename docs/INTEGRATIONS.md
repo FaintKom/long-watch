@@ -130,10 +130,8 @@ npm i rot-js
 ```
 
 #### 6. `PathFinding.js` or `rot.js` A* -> replace "straight-line velocity toward target" in `cast.ts`, `enemy.ts`, `companion.ts`
-- **Current**: `velocity = (dx/dist) * speed` - NPC walks straight into walls.
-- **After**: A* on the floor grid, follow waypoints.
-- **Files changed**: new `src/nav.ts` builds nav-grid from mansion at startup, `updateAi` paths instead of straight-line.
-- **Risk**: medium. Voxel grid -> 2D grid projection per floor is needed.
+- **Status**: DONE in Iter 33. Implemented via `rot-js` (already installed in Iter 32).
+- **Done**: `src/nav.ts` exposes `Navigator` class with cached A* paths, replan on target-move/staleness/drift, module-level `setNavWorld` singleton. `Enemy.updateAi`, `CastMember.updateAi` (fleeing + fighting), and `Companion.update` (toward enemy + follow player) all steer via `nav.steerToward` with straight-line fallback.
 
 #### 7. `bondage.js` (Yarn) -> optional hybrid dialogue for set-piece moments
 - **Current**: pure LLM dialogue.
