@@ -1984,6 +1984,11 @@ const mobileControls = document.getElementById('mobile-controls');
 if (isMobile && mobileControls) mobileControls.classList.add('active');
 
 function setupTouchControls() {
+  // Iter 56: auto-show mobile controls on touch devices (heuristic: ontouchstart + no fine pointer).
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const mc = document.getElementById('mobile-controls');
+  if (isTouch && mc) mc.classList.add('active');
+
   const stick = document.getElementById('mc-move');
   const nub = document.getElementById('mc-move-nub');
   const look = document.getElementById('mc-look');

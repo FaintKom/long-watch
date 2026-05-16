@@ -382,25 +382,25 @@
   <div id="inv-panel"></div>
   <div id="clue-panel"></div>
   <div id="shop-panel"></div>
-  <div id="pause-menu" style="display:none">
+  <div id="pause-menu" role="dialog" aria-modal="true" aria-label="Pause menu" style="display:none">
     <div class="pm-card">
       <h3>PAUSED</h3>
-      <div class="pm-row"><button id="pm-resume">Resume (Esc)</button></div>
-      <div class="pm-row"><button id="pm-save">Save Current Slot</button></div>
-      <div class="pm-row"><button id="pm-load">Load Latest Slot</button></div>
-      <div class="pm-row"><button id="pm-export">Copy Save String</button></div>
-      <div class="pm-row"><button id="pm-import">Paste Save String</button></div>
-      <div class="pm-slots" id="pm-slots"></div>
-      <div class="pm-row"><button id="pm-quit">Quit to Title (refresh)</button></div>
+      <div class="pm-row"><button id="pm-resume" aria-label="Resume game (Escape)">Resume (Esc)</button></div>
+      <div class="pm-row"><button id="pm-save" aria-label="Save to active slot">Save Current Slot</button></div>
+      <div class="pm-row"><button id="pm-load" aria-label="Load latest save">Load Latest Slot</button></div>
+      <div class="pm-row"><button id="pm-export" aria-label="Copy save string to clipboard">Copy Save String</button></div>
+      <div class="pm-row"><button id="pm-import" aria-label="Paste save string from clipboard">Paste Save String</button></div>
+      <div class="pm-slots" id="pm-slots" role="list"></div>
+      <div class="pm-row"><button id="pm-quit" aria-label="Quit to title screen by reloading">Quit to Title (refresh)</button></div>
     </div>
   </div>
 
-  <div id="mobile-controls">
-    <div class="mc-stick" id="mc-move"><div class="mc-nub" id="mc-move-nub"></div></div>
-    <div class="mc-look" id="mc-look"></div>
-    <div class="mc-btn attack" id="mc-attack">ATK</div>
-    <div class="mc-btn interact" id="mc-interact">E</div>
-    <div class="mc-btn jump" id="mc-jump">↑</div>
+  <div id="mobile-controls" role="region" aria-label="Touch controls">
+    <div class="mc-stick" id="mc-move" aria-label="Movement stick"><div class="mc-nub" id="mc-move-nub"></div></div>
+    <div class="mc-look" id="mc-look" aria-label="Camera look area"></div>
+    <div class="mc-btn attack" id="mc-attack" role="button" aria-label="Attack">ATK</div>
+    <div class="mc-btn interact" id="mc-interact" role="button" aria-label="Interact">E</div>
+    <div class="mc-btn jump" id="mc-jump" role="button" aria-label="Jump">↑</div>
   </div>
 
   <div id="end-screen">

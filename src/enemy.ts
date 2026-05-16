@@ -145,6 +145,16 @@ export class Enemy {
     ring.position.y = -0.7;
     ring.rotation.x = -Math.PI / 2;
     this.group.add(ring);
+    // Iter 56 a11y: 4-segment diamond outer ring distinguishes enemies from allies
+    // by shape rather than color alone.
+    const diamondRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.55 * scale, 0.6 * scale, 4),
+      new THREE.MeshBasicMaterial({ color: 0xff3344, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
+    );
+    diamondRing.position.y = -0.69;
+    diamondRing.rotation.x = -Math.PI / 2;
+    diamondRing.rotation.z = Math.PI / 4;
+    this.group.add(diamondRing);
 
     this.group.position.set(x, y, z);
     scene.add(this.group);
