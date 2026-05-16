@@ -6,6 +6,7 @@ import { PhysicsWorld } from './physics';
 import { Enemy, EnemyKind } from './enemy';
 import { AssassinId } from './plot';
 import { MansionData } from './mansion';
+import { ASSASSIN_FACTION } from './faction';
 
 export interface SpawnSet {
   party: EnemyKind[];
@@ -41,9 +42,11 @@ export function spawnAssassin(id: AssassinId, scene: THREE.Scene, physics: Physi
   const set = ASSASSIN_SPAWNS[id];
   const base = spawnPointFor(set.entryPoint, mansion);
   const enemies: Enemy[] = [];
+  const faction = ASSASSIN_FACTION[id];
   for (let i = 0; i < set.party.length; i++) {
     const offsetX = (i - (set.party.length - 1) / 2) * 1.2;
     const e = new Enemy(set.party[i], base.x + offsetX, base.y, base.z, scene, physics);
+    e.faction = faction;
     enemies.push(e);
   }
   return { id, enemies, flavor: set.entryFlavor };

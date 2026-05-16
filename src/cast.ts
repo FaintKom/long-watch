@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
 import { Character } from './character';
+import { FactionId } from './faction';
 
 import { TwistId, BossId } from './plot';
 
@@ -226,6 +227,7 @@ export class CastMember {
   attackedByPlayer = false;
   /** Tick timer used by AI states. */
   aiTimer = 0;
+  faction: FactionId = 'fletcher_house';
 
   constructor(def: CastDef, scene: THREE.Scene, physics: PhysicsWorld) {
     this.def = def;
@@ -276,6 +278,85 @@ export class CastMember {
 
   syncMesh() {
     this.group.position.set(this.body.position.x, this.body.position.y, this.body.position.z);
+  }
+
+  /**
+   * Run AI tick. Caller supplies position references for player and any threats
+   * (enemies + the player if the player is now hostile to fletcher faction).
+   *
+   * Returns optional damage this NPC dealt to a target this tick.
+   */
+  updateAi(
+    dt: number,
+    playerPos: THREE.Vector3,
+    playerAC: number,
+    threats: { pos: { x: number; y: number; z: number }; ac: number; isAssassin: boolean; isPlayer: boolean; deal: (dmg: number) => void }[],
+    fleeAnchor: { x: number; y: number; z: number },
+    rng: { d20: () => number; rollDice: (formula: string) => number },
+  ): void {
+    if (this.isDead) return;
+    this.syncMesh();
+    this.aiTimer += dt;
+    const me = this.body.position;
+
+    if (this.aiState === 'idle' || this.aiState === 'alarmed') {
+      // Stationary for now. Look toward player when nearby.
+      const dx = playerPos.x - me.x;
+      const dz = playerPos.z - me.z;
+      this.group.rotation.y = Math.atan2(dx, dz);
+      this.body.velocity.x = 0; this.body.velocity.z = 0;
+      return;
+    }
+
+    if (this.aiState === 'fleeing') {
+      // Run to flee anchor
+      const dx = fleeAnchor.x - me.x;
+      const dz = fleeAnchor.z - me.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 0.8) {
+        this.aiState = 'alarmed';
+        this.body.velocity.x = 0; this.body.velocity.z = 0;
+        return;
+      }
+      const v = this.def.combatStats.speed * 0.5;
+      this.body.velocity.x = (dx / dist) * v;
+      this.body.velocity.z = (dz / dist) * v;
+      this.group.rotation.y = Math.atan2(dx, dz);
+      return;
+    }
+
+    if (this.aiState === 'fighting') {
+      // Move toward + attack nearest threat
+      if (threats.length === 0) { this.aiState = 'alarmed'; return; }
+      let target = threats[0];
+      let bestDist = Infinity;
+      for (const t of threats) {
+        const dx = t.pos.x - me.x;
+        const dz = t.pos.z - me.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d < bestDist) { target = t; bestDist = d; }
+      }
+      const reach = 1.6;
+      const dx = target.pos.x - me.x;
+      const dz = target.pos.z - me.z;
+      this.group.rotation.y = Math.atan2(dx, dz);
+      if (bestDist <= reach && this.aiTimer >= 2) {
+        this.aiTimer = 0;
+        const roll = rng.d20();
+        const total = roll + this.def.combatStats.attackBonus;
+        if (roll !== 1 && (roll === 20 || total >= target.ac)) {
+          const dmg = rng.rollDice(this.def.combatStats.damageDice) + (roll === 20 ? rng.rollDice(this.def.combatStats.damageDice) : 0);
+          target.deal(dmg);
+        }
+        this.body.velocity.x = 0; this.body.velocity.z = 0;
+      } else if (bestDist > reach * 0.9) {
+        const v = this.def.combatStats.speed * 0.5;
+        this.body.velocity.x = (dx / Math.max(bestDist, 0.01)) * v;
+        this.body.velocity.z = (dz / Math.max(bestDist, 0.01)) * v;
+      } else {
+        this.body.velocity.x = 0; this.body.velocity.z = 0;
+      }
+    }
   }
 
   takeHit(damage: number, byPlayer: boolean): { died: boolean; firstHitByPlayer: boolean } {

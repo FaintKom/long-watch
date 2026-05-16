@@ -19,6 +19,7 @@ import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
 import { placeMansionProps, interactWithProp, newPlayerWorldState, PropInstance, PlayerWorldState, isPickupable } from './props';
 import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, OwnerId, ItemDef } from './inventory';
+import { defaultRelationships, isHostile, adjustAttitude } from './faction';
 import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
@@ -68,6 +69,7 @@ const props: PropInstance[] = placeMansionProps(scene, physics);
 const worldState: PlayerWorldState = newPlayerWorldState();
 const inventory = new Inventory();
 const reputation = newReputation();
+const factionRel = defaultRelationships();
 
 interface ThrowableProjectile {
   body: CANNON.Body;
@@ -179,6 +181,91 @@ function updateThrowables(dtSeconds: number) {
   if (anyHit && assassinGroup && assassinGroup.enemies.every(e => e.isDead)) {
     triggerEnding('assassin_defeated');
   }
+}
+
+/**
+ * Run AI for every cast member.
+ * Determines per-NPC threat list based on faction relations:
+ *   - Assassins are threats to fletcher_house cast (they'll fight if able, else flee)
+ *   - Player is a threat if fletcher_house is hostile to player_party
+ */
+function tickCastAi(dt: number) {
+  if (!started || endingShown) return;
+  const playerPos = player.getPosition();
+
+  // Build a generic threat list once per tick
+  const enemyThreats = (assassinGroup?.enemies ?? []).filter(e => !e.isDead).map(e => ({
+    pos: { x: e.body.position.x, y: e.body.position.y, z: e.body.position.z },
+    ac: character.ac, // unused for enemy targeting back-to-us; AC of target = my AC? we pass enemy AC instead
+    isAssassin: true,
+    isPlayer: false,
+    deal: (dmg: number) => e.takeHit(dmg),
+  }));
+  // Build enemy threats with correct AC
+  const properEnemyThreats = (assassinGroup?.enemies ?? []).filter(e => !e.isDead).map(e => ({
+    pos: { x: e.body.position.x, y: e.body.position.y, z: e.body.position.z },
+    ac: e.preset.ac,
+    isAssassin: true,
+    isPlayer: false,
+    deal: (dmg: number) => {
+      e.takeHit(dmg);
+      if (e.isDead) { logCombat(`${e.preset.name} falls.`); e.destroy(scene, physics); }
+    },
+  }));
+  // Player threat — only present if fletcher_house is hostile to player_party
+  const playerThreat = isHostile(factionRel, 'fletcher_house', 'player_party') ? [{
+    pos: { x: playerPos.x, y: playerPos.y, z: playerPos.z },
+    ac: character.ac,
+    isAssassin: false,
+    isPlayer: true,
+    deal: (dmg: number) => { character.takeDamage(dmg); logCombat(`A household defender hits you for ${dmg}.`); renderStats(); },
+  }] : [];
+
+  const fleeAnchor = mansion.matriarchSpot;
+
+  for (const cm of castMembers) {
+    if (cm.isDead) continue;
+
+    // State transitions based on environment:
+    // 1. If alarmed state + close enemy assassin -> switch fighters to fighting, flee-ers to fleeing
+    if (assassinGroup && assassinGroup.enemies.some(e => !e.isDead)) {
+      // Distance to nearest assassin
+      let nearest = Infinity;
+      for (const e of assassinGroup.enemies) {
+        if (e.isDead) continue;
+        const dx = e.body.position.x - cm.body.position.x;
+        const dz = e.body.position.z - cm.body.position.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d < nearest) nearest = d;
+      }
+      if (nearest < 12) {
+        if (cm.aiState === 'idle' || cm.aiState === 'alarmed') {
+          if (cm.def.reactionOnPlayerAttack === 'fight') cm.aiState = 'fighting';
+          else if (cm.def.id === 'heir') cm.aiState = 'fleeing';
+          else cm.aiState = 'fleeing';
+        }
+      }
+    }
+
+    // Pick threats: assassins always; player too if hostile
+    let threats = properEnemyThreats;
+    if (cm.aiState === 'fighting' && playerThreat.length > 0) {
+      threats = [...properEnemyThreats, ...playerThreat];
+    }
+
+    cm.updateAi(dt, playerPos, character.ac, threats, fleeAnchor, {
+      d20: () => rollDice(20),
+      rollDice: (formula: string) => {
+        const m = formula.match(/(\d+)d(\d+)(?:\+(\d+))?/);
+        if (!m) return 1;
+        const n = parseInt(m[1]); const s = parseInt(m[2]); const b = m[3] ? parseInt(m[3]) : 0;
+        return rollNd(n, s) + b;
+      },
+    });
+  }
+
+  // Death check on player
+  if (character.isDead() && !endingShown) triggerEnding('player_dead');
 }
 
 function lineOfSight(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
@@ -701,6 +788,13 @@ function escapeHtml(s: string): string {
 async function streamReply(message: string) {
   if (!inDialogueWith) return;
   const cm = inDialogueWith;
+  const rep = reputation.withNpc[cm.def.id] ?? 0;
+  // Hard rep gate: if NPC actively hostile or rep <= -50, refuse to talk
+  if (rep <= -50 || (isHostile(factionRel, 'fletcher_house', 'player_party') && cm.faction === 'fletcher_house')) {
+    const stream = document.getElementById('dlg-stream');
+    if (stream) stream.textContent = `${cm.def.displayName}: "Get out of my sight."`;
+    return;
+  }
   cm.pushHistory('user', message);
   gameClock.advance('ai_chat_turn');
 
@@ -710,12 +804,20 @@ async function streamReply(message: string) {
   let acc = '';
 
   try {
+    let attitudeContext = '';
+    if (rep <= -25) attitudeContext = `Current attitude toward player: COLD / DISTRUSTFUL (rep ${rep}). You are guarded, terse, less helpful.`;
+    else if (rep >= 25) attitudeContext = `Current attitude toward player: WARM / FRIENDLY (rep ${rep}).`;
+    else attitudeContext = `Current attitude toward player: NEUTRAL (rep ${rep}).`;
+    if (reputation.alarmed) attitudeContext += ' The household is ON ALARM tonight (intrusion or theft has occurred).';
+
+    const personaWithRep = cm.def.persona.persona + '\n\nCURRENT MOOD CONTEXT: ' + attitudeContext;
+
     const resp = await fetch('/api/npc-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         npcName: cm.def.displayName,
-        persona: cm.def.persona.persona,
+        persona: personaWithRep,
         knownFacts: cm.def.persona.knownFacts,
         hiddenFacts: cm.def.persona.hiddenFacts,
         speechStyle: cm.def.persona.speechStyle,
@@ -816,9 +918,21 @@ window.addEventListener('keydown', (e) => {
         reputation.alarmed = true;
         adjustRep(reputation, r.theftOwner as any, -40);
         logCombat(`Reputation with ${r.theftOwner} drops sharply.`);
+        // Witness propagation: other NPCs within 6m also learn of the theft
+        const pp = player.getPosition();
+        for (const other of castMembers) {
+          if (other.isDead || other.def.id === r.theftOwner) continue;
+          const dx = other.body.position.x - pp.x;
+          const dz = other.body.position.z - pp.z;
+          if (Math.sqrt(dx * dx + dz * dz) < 6) {
+            adjustRep(reputation, other.def.id as any, -10);
+            logCombat(`${other.def.displayName} murmurs at the disturbance.`);
+          }
+        }
         if (reputation.caughtCount >= 3) {
           logCombat('*** The household has had enough of you. ***');
-          triggerEnding('heir_dead'); // banishment
+          adjustAttitude(factionRel, 'fletcher_house', 'player_party', -60);
+          triggerEnding('heir_dead');
         }
       }
       renderStats();
@@ -952,7 +1066,13 @@ function handleCastDamage(cm: CastMember, dmg: number, byPlayer: boolean) {
   if (byPlayer && result.firstHitByPlayer) {
     adjustRep(reputation, cm.def.id as any, -50);
     reputation.alarmed = true;
+    // Tank faction relationship — fletcher_house now hostile to player_party
+    adjustAttitude(factionRel, 'fletcher_house', 'player_party', -40);
+    adjustAttitude(factionRel, 'player_party', 'fletcher_house', -40);
     logCombat(`*** ${cm.def.displayName} cries out. The household is alarmed. ***`);
+    if (isHostile(factionRel, 'fletcher_house', 'player_party')) {
+      logCombat('*** The Fletcher household considers you an enemy. ***');
+    }
   }
   if (result.died) {
     logCombat(`*** ${cm.def.displayName} falls and does not rise. ***`);
@@ -1188,8 +1308,8 @@ function animate() {
   updateInteractHint();
   updateThrowables(dt);
 
-  // Sync cast meshes (they're dynamic bodies now)
-  for (const cm of castMembers) cm.syncMesh();
+  // === Cast AI ===
+  tickCastAi(dt);
 
   // Enemy tick
   if (assassinGroup && !endingShown) {

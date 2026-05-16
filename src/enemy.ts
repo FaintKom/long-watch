@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
 import { Character, rollDice, rollNd } from './character';
+import { FactionId } from './faction';
 
 export type EnemyKind =
   | 'mook' | 'cultist' | 'priest' | 'fanatic' | 'giant_toad'
@@ -47,6 +48,7 @@ export class Enemy {
   body: CANNON.Body;
   group: THREE.Group;
   isDead = false;
+  faction: FactionId = 'freelance';
   private moveTimer = 0;
 
   constructor(kind: EnemyKind, x: number, y: number, z: number, scene: THREE.Scene, physics: PhysicsWorld) {
