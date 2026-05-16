@@ -124,6 +124,40 @@
     }
     #dialogue-panel button:hover { background: #3a3a2a; }
     #dialogue-panel .dlg-hint { font-size: 11px; color: #888; }
+
+    #combat-log {
+      position: absolute; bottom: 16px; left: 16px;
+      width: 320px; max-height: 180px;
+      overflow-y: auto;
+      background: rgba(20,10,8,0.85);
+      border: 1px solid #553;
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 12px; line-height: 1.5;
+      color: #ddd;
+      pointer-events: none;
+    }
+    #combat-log div { padding: 1px 0; border-bottom: 1px dotted #332; }
+    #combat-log div:last-child { color: #fc4; border-bottom: none; }
+
+    #end-screen {
+      position: fixed; inset: 0;
+      background: radial-gradient(circle at center, rgba(30,15,5,0.96) 0%, rgba(5,3,3,0.99) 80%);
+      z-index: 120;
+      display: none; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: #eee; text-align: center;
+    }
+    #end-screen.active { display: flex; }
+    #end-screen h1 { font-size: 64px; margin-bottom: 16px; letter-spacing: 4px; text-shadow: 0 0 24px rgba(252,196,68,0.4); }
+    #end-screen .end-body { max-width: 580px; font-size: 14px; line-height: 1.7; color: #ccc; }
+    #end-screen .end-body b { color: #fc4; }
+    #end-screen button {
+      margin-top: 30px; padding: 14px 40px;
+      background: rgba(40,20,5,0.9); color: #fc4;
+      border: 2px solid #fc4; border-radius: 4px;
+      font-family: inherit; font-size: 16px; cursor: pointer; letter-spacing: 2px;
+    }
   </style>
 </head>
 <body>
@@ -151,6 +185,13 @@
     <div id="interact-hint"></div>
   </div>
   <div id="dialogue-panel"></div>
+  <div id="combat-log"></div>
+
+  <div id="end-screen">
+    <h1 id="end-title">DAWN</h1>
+    <div class="end-body" id="end-body"></div>
+    <button id="end-restart">Play Again</button>
+  </div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

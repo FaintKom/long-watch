@@ -8,9 +8,12 @@ import { PhysicsWorld } from './physics';
 import { Player } from './player';
 import { Character } from './character';
 import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
-import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES } from './plot';
+import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES, BOSSES } from './plot';
 import { GameClock } from './clock';
 import { CAST, CastMember, CastId } from './cast';
+import { Enemy } from './enemy';
+import { spawnAssassin, SpawnedAssassinGroup } from './assassin';
+import { rollDice, rollNd } from './character';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -110,11 +113,28 @@ function paintClock() {
 }
 paintClock();
 
+let assassinGroup: SpawnedAssassinGroup | null = null;
+const combatLog: string[] = [];
+function logCombat(line: string) {
+  combatLog.push(line);
+  console.log('[Long Watch]', line);
+  const el = document.getElementById('combat-log');
+  if (el) el.innerHTML = combatLog.slice(-8).map(l => `<div>${l}</div>`).join('');
+}
+
 gameClock.onTick = (e) => {
   paintClock();
-  if (e.triggerWarning) console.log('[Long Watch] Half-hour warning — assassin draws near.');
-  if (e.triggerAssassin) console.log('[Long Watch] The assassin has arrived. (Combat hook pending Iter later.)');
-  if (e.triggerDawn) console.log('[Long Watch] Dawn breaks. The Heir survives.');
+  if (e.triggerWarning) logCombat('A chill runs through the manor. Something draws near.');
+  if (e.triggerAssassin) {
+    assassinGroup = spawnAssassin(plot.assassin, scene, physics, mansion);
+    logCombat(assassinGroup.flavor);
+    plot.revealed.assassin = true;
+    renderObjectiveCard();
+  }
+  if (e.triggerDawn) {
+    logCombat('Dawn breaks. The Heir survives.');
+    triggerEnding('heir_alive_dawn');
+  }
 };
 
 /** Track room entries to fire enter_room cost on threshold crossing. */
@@ -317,6 +337,78 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// LMB to attack nearest enemy in reach
+const PLAYER_MELEE_REACH = 2.0;
+window.addEventListener('mousedown', (e) => {
+  if (!started || inDialogueWith || endingShown) return;
+  if (e.button !== 0 || !document.pointerLockElement) return;
+  if (!assassinGroup) return;
+  // Find nearest live enemy in reach
+  const pos = player.getPosition();
+  let target: Enemy | null = null;
+  let bestDist = PLAYER_MELEE_REACH;
+  for (const en of assassinGroup.enemies) {
+    if (en.isDead) continue;
+    const dx = en.body.position.x - pos.x;
+    const dz = en.body.position.z - pos.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < bestDist) { target = en; bestDist = d; }
+  }
+  if (!target) return;
+  // Roll attack
+  const roll = rollDice(20);
+  const total = roll + 5; // +3 STR +2 prof for Lv4 fighter equiv
+  if (roll === 1) { logCombat('You miss wildly!'); return; }
+  if (roll === 20 || total >= target.preset.ac) {
+    const dmg = rollNd(roll === 20 ? 2 : 1, 8) + 3; // longsword + STR
+    target.takeHit(dmg);
+    logCombat(`You hit ${target.preset.name} for ${dmg} damage.${roll === 20 ? ' CRITICAL!' : ''}`);
+    if (target.isDead) {
+      logCombat(`${target.preset.name} falls.`);
+      target.destroy(scene, physics);
+    }
+    // Win check
+    if (assassinGroup.enemies.every(e => e.isDead)) {
+      triggerEnding('assassin_defeated');
+    }
+  } else {
+    logCombat(`Your strike glances off ${target.preset.name}.`);
+  }
+});
+
+let endingShown = false;
+function triggerEnding(reason: 'heir_alive_dawn' | 'assassin_defeated' | 'player_dead' | 'heir_dead') {
+  if (endingShown) return;
+  endingShown = true;
+  document.exitPointerLock?.();
+  const end = document.getElementById('end-screen');
+  const title = document.getElementById('end-title');
+  const body = document.getElementById('end-body');
+  if (!end || !title || !body) return;
+  if (reason === 'heir_alive_dawn' || reason === 'assassin_defeated') {
+    title.textContent = 'DAWN';
+    title.style.color = '#fc4';
+    const bossLine = plot.revealed.boss
+      ? `<div style="margin-top:8px;color:#fc4">You proved the Boss: <b>${BOSSES[plot.boss].name}</b>. Magrath adds 1,000 gold to the purse.</div>`
+      : '<div style="margin-top:8px;color:#aaa">You could not prove who paid for the hit.</div>';
+    body.innerHTML =
+      `<p>The Heir lives. Magrath presses 1,000 gold pieces into your hand.</p>` +
+      bossLine +
+      `<p style="margin-top:14px;color:#888;font-size:12px">Your objective was: <b>${summary.myObjective.name}</b></p>`;
+  } else {
+    title.textContent = 'YOU FAILED';
+    title.style.color = '#f33';
+    body.innerHTML =
+      `<p>The Heir is dead. Magrath, grief-stricken, drives you from the city.</p>` +
+      `<p style="margin-top:14px;color:#888;font-size:12px">"Leave my house, leave my city, and pray that I never lay eyes on any of you again."</p>`;
+  }
+  end.classList.add('active');
+}
+
+(window as any).__triggerEnding = triggerEnding;
+
+document.getElementById('end-restart')?.addEventListener('click', () => window.location.reload());
+
 // Expose for debugging
 (window as any).__debug = { world, physics, mansion, player, character, plot, OBJECTIVES, summary, gameClock, castMembers };
 
@@ -334,6 +426,23 @@ function animate() {
   gameClock.driftStep(dt);
   detectRoomEntry();
   updateInteractHint();
+
+  // Enemy tick
+  if (assassinGroup && !endingShown) {
+    const playerPos = player.getPosition();
+    let anyAttacked = false;
+    for (const en of assassinGroup.enemies) {
+      if (en.isDead) continue;
+      const dmg = en.updateAi(dt, playerPos, character.ac, character);
+      if (dmg > 0) {
+        anyAttacked = true;
+        logCombat(`${en.preset.name} hits you for ${dmg}.`);
+      }
+    }
+    if (anyAttacked) renderStats();
+    if (character.isDead()) triggerEnding('heir_dead');
+  }
+
   renderer.render(scene, camera);
 }
 animate();
