@@ -24,12 +24,20 @@ type WireMsg = Record<string, string | number>;
 
 export interface Multiplayer {
   selfId: string;
-  /** Call every frame with the local player position + yaw. Throttled internally to ~10 Hz. */
+  /** Call every frame with the local player position + yaw. Throttled to ~10 Hz. */
   pushSelfPos: (x: number, y: number, z: number, rotY: number, name: string) => void;
-  /** Broadcast a short chat line to other peers. */
+  /** Broadcast a chat line to peers. */
   sendChat: (text: string) => void;
-  /** Subscribe to chat lines from other peers. */
+  /** Subscribe to chat lines. */
   onChat: (cb: (peerId: string, text: string) => void) => void;
+  /** Broadcast a state event (kind + payload). */
+  sendState: (kind: string, payload: Record<string, string | number | boolean>) => void;
+  /** Subscribe to state events. */
+  onState: (cb: (peerId: string, kind: string, payload: Record<string, string | number | boolean>) => void) => void;
+  /** True iff this peer is the elected host (lowest selfId among current peers). */
+  isHost: () => boolean;
+  /** Current peer count incl. self. */
+  peerCount: () => number;
   /** Force-disconnect. */
   leave: () => void;
 }
@@ -44,10 +52,20 @@ export function maybeJoinRoom(scene: THREE.Scene): Multiplayer | null {
   const room = joinRoom({ appId: 'long-watch' }, roomName);
   const [sendPosRaw, getPosRaw] = room.makeAction<WireMsg>('pos');
   const [sendChatRaw, getChatRaw] = room.makeAction<WireMsg>('chat');
+  const [sendStateRaw, getStateRaw] = room.makeAction<WireMsg>('state');
   const sendPos = (m: PosMsg) => sendPosRaw(m as unknown as WireMsg);
   const sendChat = (m: ChatMsg) => sendChatRaw(m as unknown as WireMsg);
   const getPos = (cb: (data: PosMsg, peerId: string) => void) => getPosRaw((d, peer) => cb(d as unknown as PosMsg, peer));
   const getChat = (cb: (data: ChatMsg, peerId: string) => void) => getChatRaw((d, peer) => cb(d as unknown as ChatMsg, peer));
+
+  // Peer roster + host election (lowest selfId wins).
+  const peers = new Set<string>();
+  function isHost(): boolean {
+    let min = selfId;
+    for (const p of peers) if (p < min) min = p;
+    return min === selfId;
+  }
+  function peerCount(): number { return peers.size + 1; }
 
   const ghosts = new Map<string, THREE.Group>();
 
@@ -86,12 +104,15 @@ export function maybeJoinRoom(scene: THREE.Scene): Multiplayer | null {
   }
 
   getPos((data, peerId) => {
+    peers.add(peerId);
     const g = ghostFor(peerId, data.name);
     g.position.set(data.x, data.y, data.z);
     g.rotation.y = data.rotY;
   });
 
+  room.onPeerJoin((peerId) => { peers.add(peerId); });
   room.onPeerLeave((peerId) => {
+    peers.delete(peerId);
     const g = ghosts.get(peerId);
     if (g) { scene.remove(g); ghosts.delete(peerId); }
   });
@@ -99,6 +120,14 @@ export function maybeJoinRoom(scene: THREE.Scene): Multiplayer | null {
   let chatHandler: ((peerId: string, text: string) => void) | null = null;
   getChat((data, peerId) => {
     if (chatHandler) chatHandler(peerId, data.text);
+  });
+
+  let stateHandler: ((peerId: string, kind: string, payload: Record<string, string | number | boolean>) => void) | null = null;
+  getStateRaw((data, peerId) => {
+    if (!stateHandler) return;
+    const kind = String((data as { kind?: unknown }).kind ?? '');
+    const payload = data as unknown as Record<string, string | number | boolean>;
+    stateHandler(peerId, kind, payload);
   });
 
   let lastPosSent = 0;
@@ -121,6 +150,10 @@ export function maybeJoinRoom(scene: THREE.Scene): Multiplayer | null {
     pushSelfPos,
     sendChat: (text) => { void sendChat({ text }); },
     onChat: (cb) => { chatHandler = cb; },
+    sendState: (kind, payload) => { void sendStateRaw({ kind, ...payload } as unknown as WireMsg); },
+    onState: (cb) => { stateHandler = cb; },
+    isHost,
+    peerCount,
     leave,
   };
 }

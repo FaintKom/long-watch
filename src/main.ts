@@ -538,7 +538,43 @@ const consequences = new ConsequenceStore();
 const gameActor = startGameActor((snap) => console.log('[gameState]', snap.value));
 // Opt-in P2P via ?room=NAME URL param. Null when single-player.
 const mp: Multiplayer | null = maybeJoinRoom(scene);
-if (mp) mp.onChat((peerId, text) => logCombat(`[peer ${peerId.slice(0, 4)}] ${text}`));
+if (mp) {
+  // Wire chat input submit.
+  const chatInp = document.getElementById('mp-chat-input') as HTMLInputElement | null;
+  chatInp?.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      const v = chatInp.value.trim();
+      if (v.length > 0) {
+        mp.sendChat(v);
+        logCombat(`[you] ${v}`);
+      }
+      chatInp.classList.remove('open');
+      chatInp.value = '';
+      renderer.domElement.requestPointerLock();
+    } else if (e.key === 'Escape') {
+      chatInp.classList.remove('open');
+      chatInp.value = '';
+      renderer.domElement.requestPointerLock();
+    }
+  });
+  mp.onChat((peerId, text) => logCombat(`[peer ${peerId.slice(0, 4)}] ${text}`));
+  mp.onState((peerId, kind, payload) => {
+    if (kind === 'log') {
+      logCombat(`[peer ${peerId.slice(0, 4)}] ${payload.text}`);
+    } else if (kind === 'kill') {
+      logCombat(`[peer ${peerId.slice(0, 4)}] dropped ${payload.target}.`);
+    } else if (kind === 'clue') {
+      logCombat(`[peer ${peerId.slice(0, 4)}] examined ${payload.label} (${payload.passed ? 'PASS' : 'FAIL'}).`);
+    }
+  });
+  const overlay = document.getElementById('mp-overlay');
+  if (overlay) overlay.style.display = 'block';
+  setInterval(() => {
+    const el = document.getElementById('mp-peer-count');
+    if (el) el.textContent = `Party: ${mp.peerCount()} ${mp.isHost() ? '(host)' : ''}`;
+  }, 1000);
+}
 /** Backwards-compat alias for code that still reads the raw feed (e.g. save/load). */
 const worldFeed: WorldFeed = memory.feed;
 /** Log to UI combat log AND chronicle to long-term memory (public visibility). For targeted events use memory.addEvent with a CastId[] visibility. */
@@ -1071,6 +1107,18 @@ window.addEventListener('keydown', (e) => {
     toggleCluePanel();
     return;
   }
+  if (e.code === 'KeyY' && mp) {
+    // Toggle party chat input. Use Y so it doesn't clash with T (shop).
+    const inp = document.getElementById('mp-chat-input') as HTMLInputElement | null;
+    if (inp) {
+      const isOpen = inp.classList.contains('open');
+      if (isOpen) { inp.classList.remove('open'); inp.blur(); }
+      else {
+        inp.classList.add('open'); inp.value = ''; setTimeout(() => inp.focus(), 50);
+      }
+    }
+    return;
+  }
   if (e.code === 'KeyT') {
     // Open shop with nearest cast member who sells
     const cm = nearestCastMember();
@@ -1199,6 +1247,7 @@ function examineClue(c: CluePropInstance) {
     renderObjectiveCard();
   }
   renderCluePanel();
+  if (mp) mp.sendState('clue', { label: c.def.label, passed: res.passed });
 }
 
 let cluePanelOpen = false;
@@ -1298,7 +1347,10 @@ function swingAt(target: Enemy) {
     takeHit: (dmg) => target.takeHit(dmg),
     log: logCombat,
     playSfx,
-    onLethal: () => { target.destroy(scene, physics); },
+    onLethal: () => {
+      target.destroy(scene, physics);
+      if (mp) mp.sendState('kill', { target: target.preset.name });
+    },
     onResolved: (f) => {
       if (f.hit) {
         spawnBurst({
