@@ -1,18 +1,13 @@
 /**
  * Long Watch — entry.
- * Iter 1: core engine wired (voxel world, physics, FPS player, character).
- * A small test room is built so the engine + controls can be exercised before
- * the full mansion (Iter 2) lands.
+ * Iter 2: full mansion level wired in. Player spawns in the Entry Hall.
  */
 import * as THREE from 'three';
-import { VoxelWorld, BLOCK } from './world';
+import { VoxelWorld } from './world';
 import { PhysicsWorld } from './physics';
 import { Player } from './player';
 import { Character } from './character';
-
-const MAP_W = 24;
-const MAP_H = 8;
-const MAP_D = 24;
+import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
 const startScreen = document.getElementById('start-screen');
@@ -27,94 +22,32 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.25;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1612);
-scene.fog = new THREE.FogExp2(0x1a1612, 0.025);
+scene.background = new THREE.Color(0x14110d);
+scene.fog = new THREE.FogExp2(0x14110d, 0.022);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
 
-scene.add(new THREE.AmbientLight(0x556677, 0.55));
-scene.add(new THREE.HemisphereLight(0x668899, 0x332211, 0.45));
+scene.add(new THREE.AmbientLight(0x556677, 0.5));
+scene.add(new THREE.HemisphereLight(0x668899, 0x332211, 0.4));
 
-// === World + Physics ===
+// === World + Physics + Mansion ===
 const world = new VoxelWorld(MAP_W, MAP_H, MAP_D);
 const physics = new PhysicsWorld();
-
-// Build a small test parlour: wood floor, plaster walls, carpet runner, fireplace,
-// chandelier candle, window.
-world.fill(0, 0, 0, MAP_W - 1, 0, MAP_D - 1, BLOCK.WOOD_FLOOR);
-// Carpet runner
-world.fill(10, 0, 4, 13, 0, MAP_D - 5, BLOCK.CARPET);
-// Outer walls (plaster)
-const WALL_H = 4;
-world.fill(0, 1, 0, MAP_W - 1, WALL_H, 0, BLOCK.PLASTER);
-world.fill(0, 1, MAP_D - 1, MAP_W - 1, WALL_H, MAP_D - 1, BLOCK.PLASTER);
-world.fill(0, 1, 0, 0, WALL_H, MAP_D - 1, BLOCK.PLASTER);
-world.fill(MAP_W - 1, 1, 0, MAP_W - 1, WALL_H, MAP_D - 1, BLOCK.PLASTER);
-// Windows on one wall
-world.fill(6, 2, 0, 7, 3, 0, BLOCK.GLASS);
-world.fill(16, 2, 0, 17, 3, 0, BLOCK.GLASS);
-// Fireplace (brick)
-world.fill(11, 1, 0, 12, 3, 0, BLOCK.BRICK);
-world.set(11, 1, 1, BLOCK.BRICK);
-world.set(12, 1, 1, BLOCK.BRICK);
-// Dining table (dark wood)
-world.fill(10, 1, 14, 13, 1, 18, BLOCK.DARK_WOOD);
-// Bookshelves
-world.fill(1, 1, 2, 1, 3, 8, BLOCK.DARK_WOOD);
-world.fill(MAP_W - 2, 1, 2, MAP_W - 2, 3, 8, BLOCK.DARK_WOOD);
-// Doorway in far wall
-world.fill(11, 1, MAP_D - 1, 12, 3, MAP_D - 1, BLOCK.AIR);
-
-// Add static physics colliders for solid blocks (only those with exposed face)
-for (let y = 0; y < MAP_H; y++) {
-  for (let z = 0; z < MAP_D; z++) {
-    for (let x = 0; x < MAP_W; x++) {
-      if (!world.isSolid(x, y, z)) continue;
-      const exposed =
-        !world.isSolid(x - 1, y, z) || !world.isSolid(x + 1, y, z) ||
-        !world.isSolid(x, y - 1, z) || !world.isSolid(x, y + 1, z) ||
-        !world.isSolid(x, y, z - 1) || !world.isSolid(x, y, z + 1);
-      if (!exposed) continue;
-      physics.addStaticBox(x + 0.5, y + 0.5, z + 0.5, 1, 1, 1);
-    }
-  }
-}
-
-world.rebuild();
+const mansion = buildMansion(world, physics, scene);
 scene.add(world.group);
-
-// Warm lamp lights in the room
-function addLamp(x: number, y: number, z: number, color = 0xffaa44, intensity = 1.0) {
-  const light = new THREE.PointLight(color, intensity, 12, 1.5);
-  light.position.set(x, y, z);
-  scene.add(light);
-  const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(0.1, 6, 6),
-    new THREE.MeshBasicMaterial({ color }),
-  );
-  glow.position.set(x, y, z);
-  scene.add(glow);
-}
-addLamp(6, 3.2, 4, 0xff9a44, 1.2);
-addLamp(MAP_W - 6, 3.2, 4, 0xff9a44, 1.2);
-addLamp(MAP_W / 2, 3.3, MAP_D / 2, 0xffcc66, 1.5);
-addLamp(11.5, 2.3, 0.5, 0xff7733, 1.4); // fireplace
 
 // === Player ===
 const player = new Player(camera, physics, world);
-player.setPosition(MAP_W / 2, 2, MAP_D / 2 + 3);
+player.setPosition(mansion.spawnPoint.x, mansion.spawnPoint.y, mansion.spawnPoint.z);
 scene.add(player.yaw);
 
 // === Character ===
 const character = new Character('Adventurer');
-// Long Watch starting stats are roughly balanced; we keep auto-rolled for now
-character.maxHp = 28;
-character.hp = 28;
-character.ac = 15;
+character.maxHp = 28; character.hp = 28; character.ac = 15;
 
 function renderStats() {
   if (!statsEl) return;
@@ -136,9 +69,9 @@ if (objEl) {
     '<div class="obj-text">You have no secret objective. Why do you ask?</div>';
 }
 
-// === Game clock (placeholder — full event-time hybrid lands in later iter) ===
+// === Game clock placeholder ===
 let started = false;
-let clockMin = 21 * 60; // 9:00 PM
+let clockMin = 21 * 60;
 function formatClock(totalMin: number): string {
   const h24 = Math.floor(totalMin / 60) % 24;
   const m = totalMin % 60;
@@ -150,7 +83,7 @@ setInterval(() => {
   if (!started) return;
   clockMin++;
   if (clockEl) clockEl.textContent = formatClock(clockMin);
-}, 2500); // 1 in-game minute every 2.5 real sec, placeholder pacing
+}, 2500);
 
 startBtn?.addEventListener('click', () => {
   if (started) return;
@@ -169,7 +102,9 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// === Game loop ===
+// Expose for debugging
+(window as any).__debug = { world, physics, mansion, player, character };
+
 let prevTime = performance.now();
 function animate() {
   requestAnimationFrame(animate);
