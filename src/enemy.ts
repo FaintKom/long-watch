@@ -34,7 +34,7 @@ export const ENEMY_PRESETS: Record<EnemyKind, EnemyPreset> = {
   priest:        { name: 'Priest',        hp: 27, ac: 13, attackBonus: 5, damageDice: '1d6+3', reach: 1.6, speed: 5, bodyColor: 0x113355, eyeColor: 0x66ccff, ai: 'caster' },
   fanatic:       { name: 'Cult Fanatic',  hp: 33, ac: 13, attackBonus: 4, damageDice: '1d4+2', reach: 1.6, speed: 6, bodyColor: 0x553311, eyeColor: 0xff8800, ai: 'caster' },
   giant_toad:    { name: 'Giant Toad',    hp: 39, ac: 11, attackBonus: 4, damageDice: '1d10+2', reach: 1.6, speed: 4, bodyColor: 0x336622, eyeColor: 0x88ff44, ai: 'melee' },
-  crimson_angel: { name: 'Crimson Angel', hp: 78, ac: 15, attackBonus: 6, damageDice: '1d8+3', reach: 1.6, speed: 8, bodyColor: 0xaa1133, eyeColor: 0xff0066, scale: 1.05, ai: 'melee' },
+  crimson_angel: { name: 'Crimson Angel', hp: 110, ac: 17, attackBonus: 7, damageDice: '1d8+4', reach: 1.6, speed: 8, bodyColor: 0xaa1133, eyeColor: 0xff0066, scale: 1.05, ai: 'melee' },
   sebek_ari:     { name: 'Sebek-Ari',     hp: 66, ac: 12, attackBonus: 5, damageDice: '1d6+3', reach: 1.6, speed: 6, bodyColor: 0x445533, eyeColor: 0xffcc22, scale: 1.05, ai: 'caster' },
   swarm_snakes:  { name: 'Swarm of Snakes', hp: 36, ac: 14, attackBonus: 5, damageDice: '2d6', reach: 1.0, speed: 4, bodyColor: 0x664422, eyeColor: 0xddaa00, ai: 'melee' },
   mezzoloth:     { name: 'Mezzoloth',     hp: 75, ac: 18, attackBonus: 7, damageDice: '2d6+3', reach: 1.8, speed: 5, bodyColor: 0x553322, eyeColor: 0xff4400, scale: 1.15, ai: 'melee' },
