@@ -9,6 +9,7 @@ import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
 import { Character } from './character';
 import { FactionId } from './faction';
+import { tryUpgradeWithVox, VOX_KEYS } from './voxModels';
 
 import { TwistId, BossId } from './plot';
 
@@ -478,6 +479,10 @@ export class CastMember {
 
     this.group.position.set(x, y, z);
     scene.add(this.group);
+
+    // Try to upgrade box mesh with MagicaVoxel model if asset exists in /models/.
+    // Fire-and-forget; fallback box stays visible until/unless the model loads.
+    void tryUpgradeWithVox(VOX_KEYS.cast[def.id], this.group, { scale: 0.045, yOffset: -0.4 });
   }
 
   pushHistory(role: 'user' | 'assistant', content: string) {

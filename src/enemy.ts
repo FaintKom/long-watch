@@ -4,8 +4,10 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
-import { Character, rollDice, rollNd } from './character';
+import { Character, rollDice, rollAttackDamage } from './character';
 import { FactionId } from './faction';
+import { tryUpgradeWithVox, VOX_KEYS } from './voxModels';
+import { getMonster, firstMeleeAttackFormula, firstAttackBonus, srdAC } from './srd';
 
 export type EnemyKind =
   | 'mook' | 'cultist' | 'priest' | 'fanatic' | 'giant_toad'
@@ -37,6 +39,48 @@ export const ENEMY_PRESETS: Record<EnemyKind, EnemyPreset> = {
   mezzoloth:     { name: 'Mezzoloth',     hp: 75, ac: 18, attackBonus: 7, damageDice: '2d6+3', reach: 1.8, speed: 5, bodyColor: 0x553322, eyeColor: 0xff4400, scale: 1.15, ai: 'melee' },
   air_elemental: { name: 'Air Elemental', hp: 90, ac: 15, attackBonus: 8, damageDice: '2d8', reach: 1.6, speed: 9, bodyColor: 0x88aacc, eyeColor: 0xddeeff, scale: 1.1, ai: 'melee' },
 };
+
+/**
+ * Maps in-game EnemyKind → SRD `index` slugs (5e-bits canonical strings).
+ * `null` = no canonical SRD counterpart (homebrew / non-SRD; preset stats stay).
+ */
+export const ENEMY_SRD_INDEX: Record<EnemyKind, string | null> = {
+  mook: 'thug',
+  cultist: 'cultist',
+  priest: 'priest',
+  fanatic: 'cult-fanatic',
+  giant_toad: 'giant-toad',
+  crimson_angel: null,
+  sebek_ari: null,
+  swarm_snakes: 'swarm-of-poisonous-snakes',
+  mezzoloth: null,
+  air_elemental: 'air-elemental',
+};
+
+/**
+ * One-shot enrichment: overrides preset HP/AC/attack from canonical SRD where mapped.
+ * Custom monsters (null mapping) and gameplay-tuned bosses are left alone.
+ * Designed to be awaited once at boot before spawning enemies.
+ */
+export async function enrichPresetsFromSRD(): Promise<void> {
+  await Promise.all((Object.keys(ENEMY_SRD_INDEX) as EnemyKind[]).map(async (kind) => {
+    const idx = ENEMY_SRD_INDEX[kind];
+    if (!idx) return;
+    try {
+      const m = await getMonster(idx);
+      if (!m) return;
+      const preset = ENEMY_PRESETS[kind];
+      preset.hp = m.hit_points;
+      preset.ac = srdAC(m);
+      const ab = firstAttackBonus(m);
+      if (ab !== null) preset.attackBonus = ab;
+      const dd = firstMeleeAttackFormula(m);
+      if (dd) preset.damageDice = dd;
+    } catch (e) {
+      console.warn(`[SRD] enrich failed for ${kind} (${idx}):`, e);
+    }
+  }));
+}
 
 let enemyIdCounter = 0;
 
@@ -102,6 +146,9 @@ export class Enemy {
 
     this.group.position.set(x, y, z);
     scene.add(this.group);
+
+    const voxKey = (VOX_KEYS.enemy as Record<string, string>)[kind];
+    if (voxKey) void tryUpgradeWithVox(voxKey, this.group, { scale: 0.045, yOffset: -0.4 });
   }
 
   syncMesh() {
@@ -125,12 +172,7 @@ export class Enemy {
       const roll = rollDice(20);
       const total = roll + this.preset.attackBonus;
       if (roll !== 1 && (roll === 20 || total >= playerAC)) {
-        const m = this.preset.damageDice.match(/(\d+)d(\d+)(?:\+(\d+))?/);
-        if (!m) return 0;
-        const n = parseInt(m[1]);
-        const s = parseInt(m[2]);
-        const b = m[3] ? parseInt(m[3]) : 0;
-        const dmg = rollNd(n, s) + b + (roll === 20 ? rollNd(n, s) : 0);
+        const dmg = rollAttackDamage(this.preset.damageDice, roll === 20);
         playerCharacter.takeDamage(dmg);
         return dmg;
       }

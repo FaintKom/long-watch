@@ -1,6 +1,50 @@
 /**
  * D&D 5e character model, tuned for Long Watch (4th-level adventurers).
  */
+import { Dice } from 'dice-typescript';
+
+const _dice = new Dice();
+
+/**
+ * Evaluate a dice formula like "2d6+3", "1d20kh1" (advantage = keep highest 1 of 2d20),
+ * "4d6dl1" (drop lowest), "1d6!" (exploding). Returns the total.
+ * Use for any formula coming from data (item.damageDice, monster.attack, etc).
+ */
+export function rollFormula(formula: string): number {
+  try {
+    return _dice.roll(formula).total;
+  } catch {
+    // Fallback: parse simple "NdM+B" or "NdM"
+    const m = formula.match(/^(\d+)d(\d+)(?:\+(\d+))?$/);
+    if (!m) return 0;
+    return rollNd(parseInt(m[1]), parseInt(m[2])) + (m[3] ? parseInt(m[3]) : 0);
+  }
+}
+
+/** Roll N copies of a formula and sum (used for crit-doubling: rollFormulaN(2, "1d8+3")). */
+export function rollFormulaN(times: number, formula: string): number {
+  let total = 0;
+  for (let i = 0; i < times; i++) total += rollFormula(formula);
+  return total;
+}
+
+/**
+ * 5e attack damage. Splits "NdM(+B)" → rolls N dice (doubled on crit) plus B once.
+ * Falls back to rollFormula for non-trivial formulas (kh/dl/!) — those are passed through as-is.
+ */
+export function rollAttackDamage(formula: string, critical = false): number {
+  const m = formula.match(/^(\d+)d(\d+)(?:([+-])(\d+))?$/);
+  if (!m) {
+    // Complex formula — let dice-typescript handle, no automatic crit doubling.
+    return critical ? rollFormulaN(2, formula) : rollFormula(formula);
+  }
+  const n = parseInt(m[1]);
+  const sides = parseInt(m[2]);
+  const sign = m[3] === '-' ? -1 : 1;
+  const bonus = m[4] ? sign * parseInt(m[4]) : 0;
+  return rollNd(critical ? n * 2 : n, sides) + bonus;
+}
+
 export interface DndStats {
   str: number;
   dex: number;
@@ -96,10 +140,7 @@ export class Character {
     const critical = roll === 20;
     if (roll === 1) return { hit: false, damage: 0, critical: false };
     if (critical || total >= targetAC) {
-      const m = damageDice.match(/(\d+)d(\d+)/);
-      const n = m ? parseInt(m[1]) : 1;
-      const s = m ? parseInt(m[2]) : 6;
-      const dmg = rollNd(critical ? n * 2 : n, s) + modifier(this.stats[ability]);
+      const dmg = rollAttackDamage(damageDice, critical) + modifier(this.stats[ability]);
       return { hit: true, damage: Math.max(1, dmg), critical };
     }
     return { hit: false, damage: 0, critical: false };

@@ -11,9 +11,9 @@ import { buildMansion, MAP_W, MAP_H, MAP_D } from './mansion';
 import { rollPlot, rollObjectivesForParty, summarizeForPlayer, OBJECTIVES, BOSSES } from './plot';
 import { GameClock } from './clock';
 import { CAST, CastMember, CastId, applyPlotContext } from './cast';
-import { Enemy } from './enemy';
+import { Enemy, enrichPresetsFromSRD } from './enemy';
 import { spawnAssassin, SpawnedAssassinGroup } from './assassin';
-import { rollDice, rollNd } from './character';
+import { rollDice, rollNd, rollFormula, rollAttackDamage } from './character';
 import { CLASSES, ClassId, applyClass } from './classes';
 import { buildClueProps, attemptClue, CluePropInstance } from './clues';
 import { newResourcePool, secondWind, actionSurge, cunningAction, sneakAttackDamage, channelDivinityTurnUndead, SPELLS, STARTING_SPELLS, ResourcePool } from './actions';
@@ -22,6 +22,7 @@ import { Inventory, ITEM_DEFS, newReputation, adjustRep, SHOP_INVENTORIES, Owner
 import { defaultRelationships, isHostile, adjustAttitude } from './faction';
 import { Companion, KARLA } from './companion';
 import { WorldFeed, formatEventsForPrompt } from './events';
+import { isVisibleOnFloor } from './fov';
 import * as CANNON from 'cannon-es';
 
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement | null;
@@ -126,15 +127,7 @@ function updateThrowables(dtSeconds: number) {
     t.mesh.position.set(t.body.position.x, t.body.position.y, t.body.position.z);
 
     const dice = t.def.damageThrown ?? '1d3';
-    function rollDmg(): number {
-      const m = dice.match(/(\d+)d(\d+)(?:\+(\d+))?/);
-      if (!m) return 1;
-      const n = parseInt(m[1]);
-      const sides = parseInt(m[2]);
-      const b = m[3] ? parseInt(m[3]) : 0;
-      let r = 0; for (let i = 0; i < n; i++) r += Math.floor(Math.random() * sides) + 1;
-      return r + b;
-    }
+    const rollDmg = () => Math.max(1, rollFormula(dice));
     // Enemy collision
     if (assassinGroup) {
       for (const en of assassinGroup.enemies) {
@@ -260,12 +253,7 @@ function tickCastAi(dt: number) {
 
     cm.updateAi(dt, playerPos, character.ac, threats, fleeAnchor, {
       d20: () => rollDice(20),
-      rollDice: (formula: string) => {
-        const m = formula.match(/(\d+)d(\d+)(?:\+(\d+))?/);
-        if (!m) return 1;
-        const n = parseInt(m[1]); const s = parseInt(m[2]); const b = m[3] ? parseInt(m[3]) : 0;
-        return rollNd(n, s) + b;
-      },
+      rollDice: (formula: string) => Math.max(0, rollFormula(formula)),
     });
   }
 
@@ -290,10 +278,17 @@ function witnessCheck(stealthTotal: number, ownerId: OwnerId): { caught: boolean
   // The owner of the item is the strongest witness if nearby. Other NPCs check too.
   for (const cm of castMembers) {
     if (cm.def.id === 'gardener') continue; // gardener is outside
+    if (cm.isDead) continue;
     const npcP = cm.body.position;
     const dist = Math.sqrt((pos.x - npcP.x) ** 2 + (pos.y - npcP.y) ** 2 + (pos.z - npcP.z) ** 2);
     if (dist > 12) continue;
+    // Raycast LOS through voxels (3D-correct).
     if (!lineOfSight(pos.x, pos.y + 1.5, pos.z, npcP.x, npcP.y + 1.4, npcP.z)) continue;
+    // Shadow-cast LOS + cone-of-vision on the NPC's floor slice.
+    // NPC facing direction is encoded by group.rotation.y (atan2(dx,dz)).
+    const facingY = cm.group.rotation.y;
+    const facing = { dx: Math.sin(facingY), dz: Math.cos(facingY), coneRad: Math.PI * 0.55 }; // ~100deg cone
+    if (!isVisibleOnFloor(world, npcP.x, npcP.z, pos.x, pos.z, npcP.y + 1.4, 12, facing)) continue;
     // Stand-in passive perception: 10 + WIS mod (estimated). Take 10 + 2 = 12.
     const perception = 12 + (cm.def.id === ownerId ? 3 : 0); // owner is more vigilant
     if (stealthTotal < perception) {
@@ -468,6 +463,10 @@ let resourcePool: ResourcePool = newResourcePool(chosenClass);
 let learnedSpells: string[] = STARTING_SPELLS[chosenClass];
 /** Index of currently selected spell for cast. */
 let activeSpellIdx = 0;
+
+// Kick off SRD enrichment in parallel with the user reading the intro screen.
+// Spawned enemies (assassin arrival is minutes into the game) will see the canonical stats.
+void enrichPresetsFromSRD().catch((e) => console.warn('[SRD] enrichment skipped:', e));
 
 startBtn?.addEventListener('click', () => {
   if (started) return;

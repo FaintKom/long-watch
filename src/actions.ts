@@ -1,7 +1,7 @@
 /**
  * Class signature actions and spells.
  */
-import { Character, rollDice, rollNd, modifier } from './character';
+import { Character, rollDice, rollNd, modifier, rollAttackDamage } from './character';
 import { ClassId } from './classes';
 import { Enemy } from './enemy';
 
@@ -81,11 +81,8 @@ function attackVsAC(character: Character, target: Enemy, ability: 'int' | 'wis',
   const total = roll + atkBonus;
   if (roll === 1) return { log: ['Spell attack: 1 - fumble.'] };
   if (roll === 20 || total >= target.preset.ac) {
-    const m = damageDice.match(/(\d+)d(\d+)/);
-    if (!m) return { log: ['Hit, but no damage configured.'] };
-    const n = parseInt(m[1]);
-    const s = parseInt(m[2]);
-    const dmg = rollNd(roll === 20 ? n * 2 : n, s);
+    const dmg = rollAttackDamage(damageDice, roll === 20);
+    if (dmg <= 0) return { log: ['Hit, but no damage configured.'] };
     target.takeHit(dmg);
     return { log: [`Spell ${total} vs AC ${target.preset.ac}: HIT for ${dmg}.`], damageDealt: dmg };
   }

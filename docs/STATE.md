@@ -42,6 +42,9 @@ Env: `.env` with `GROQ_API_KEY=...` (gitignored). Optional `GROQ_MODEL=`.
 | `props.ts` | 15 prop kinds (pots, crates, food, chairs, doors, etc), PICKUPABLE_KINDS, theft via TheftContext + witness check. |
 | `clues.ts` | Investigation clue props per Boss/Twist. |
 | `state.ts` | Save/load helpers. |
+| `voxModels.ts` | MagicaVoxel `.vox` loader with graceful fallback. `tryUpgradeWithVox(key, group, opts)` swaps box body for vox model if `/models/<key>.vox` exists. Cache per key. |
+| `fov.ts` | rot-js wrapper: `isVisibleOnFloor` (shadowcast + cone), `pathOnFloor` (A*). |
+| `srd.ts` | Loads `/srd/monsters.json` + `/srd/spells.json` from 5e-bits/5e-database. `getMonster(idx)`, `getSpell(idx)`, `firstMeleeAttackFormula`, etc. |
 
 ---
 
@@ -152,7 +155,12 @@ npm run dev             # http://localhost:3100
 - **Iter 20**: Ownership system + steal/buy/transfer + witness check.
 - **Iter 21**: Throwables via cannon-es dynamic spheres. Removed chair-sit healing.
 - **Iter 22-30**: Full faction system, player-attacks-NPC handling, companion (Karla), reputation gates, save/load, mobile controls, Heir AI variants.
-- **Iter 31** (current): Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
+- **Iter 31**: Rich AI personas (10 fields per NPC) + WorldFeed event chronicle injected into Groq prompts. All scripted dialogue branches removed - pure AI now.
+- **Iter 32** (current): Tier-1 third-party integrations from `docs/INTEGRATIONS.md`:
+  - `dice-typescript` -> `rollFormula`, `rollAttackDamage` in `character.ts`; deleted 5 regex parsers in `enemy.ts` / `companion.ts` / `actions.ts` / `character.ts` / `main.ts`.
+  - `threejs-vox-loader` + `src/voxModels.ts` (graceful fallback). CastMember / Companion / Enemy constructors fire-and-forget upgrade their box body to `/models/<key>.vox` if present. Drop .vox files into `public/models/` to populate.
+  - `rot-js` + `src/fov.ts` exposes `isVisibleOnFloor` (PreciseShadowcasting + cone-of-vision gate) and `pathOnFloor` (A* on Y-slice). `witnessCheck` now uses both raycast LOS and shadowcast + 100deg cone — NPC facing away can't witness theft.
+  - `5e-bits/5e-database` shallow-cloned into `vendor/5e-database` (gitignored). Needed JSON files copied into `public/srd/{monsters,spells}.json`. `src/srd.ts` loads + indexes them. `enrichPresetsFromSRD()` runs at boot to override `ENEMY_PRESETS` HP/AC/attackBonus/damageDice from canonical statblocks for `thug`/`cultist`/`priest`/`cult-fanatic`/`giant-toad`/`swarm-of-poisonous-snakes`/`air-elemental`. Custom bosses keep hand-tuned stats.
 
 ---
 

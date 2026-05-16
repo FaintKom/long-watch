@@ -4,9 +4,10 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { PhysicsWorld } from './physics';
-import { Character, rollDice, rollNd } from './character';
+import { Character, rollDice, rollAttackDamage } from './character';
 import { Enemy } from './enemy';
 import { FactionId } from './faction';
+import { tryUpgradeWithVox, VOX_KEYS } from './voxModels';
 
 export interface CompanionDef {
   id: string;
@@ -67,6 +68,9 @@ export class Companion {
     this.group.add(ring);
     this.group.position.set(x, y, z);
     scene.add(this.group);
+
+    const voxKey = (VOX_KEYS.companion as Record<string, string>)[def.id];
+    if (voxKey) void tryUpgradeWithVox(voxKey, this.group, { scale: 0.045, yOffset: -0.4 });
   }
 
   syncMesh() {
@@ -106,12 +110,7 @@ export class Companion {
         const roll = rollDice(20);
         const total = roll + this.def.combatStats.attackBonus;
         if (roll !== 1 && (roll === 20 || total >= nearestEnemy.preset.ac)) {
-          const m = this.def.combatStats.damageDice.match(/(\d+)d(\d+)(?:\+(\d+))?/);
-          if (!m) return null;
-          const n = parseInt(m[1]);
-          const sides = parseInt(m[2]);
-          const b = m[3] ? parseInt(m[3]) : 0;
-          const dmg = rollNd(roll === 20 ? n * 2 : n, sides) + b;
+          const dmg = rollAttackDamage(this.def.combatStats.damageDice, roll === 20);
           nearestEnemy.takeHit(dmg);
           return { dealtTo: nearestEnemy, dmg };
         }
