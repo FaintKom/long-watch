@@ -27,7 +27,7 @@ import { ConsequenceStore, formatFlagsForPrompt } from './consequences';
 import { buildCatacombs, Catacombs } from './catacombs';
 import { currentSpot } from './schedules';
 import { computeWitnesses, diffuseRumors } from './witnesses';
-import { unlockAudio, play as playSfx } from './audio';
+import { unlockAudio, play as playSfx, setAmbient } from './audio';
 import { resolveAttack, applyCombatFrame } from './combat';
 import { getSeed, setSeed } from './rng';
 import { startGameActor } from './gameState';
@@ -58,8 +58,41 @@ scene.fog = new THREE.FogExp2(0x14110d, 0.022);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
 
-scene.add(new THREE.AmbientLight(0x556677, 0.5));
-scene.add(new THREE.HemisphereLight(0x668899, 0x332211, 0.4));
+const ambientLight = new THREE.AmbientLight(0x556677, 0.5);
+scene.add(ambientLight);
+const hemiLight = new THREE.HemisphereLight(0x668899, 0x332211, 0.4);
+scene.add(hemiLight);
+
+// --- Iter 46: candle flicker + dawn dim/bright cycle ---
+const candleLights: THREE.PointLight[] = [];
+const candleSpots = [
+  { x: 17.5, y: 2.5, z: 8,  c: 0xffaa55 }, // entry hall
+  { x: 6,    y: 2.5, z: 8,  c: 0xffaa55 }, // study
+  { x: 42,   y: 2.5, z: 7,  c: 0xffaa55 }, // kitchen
+  { x: 30,   y: 7.4, z: 22, c: 0xffaa55 }, // library
+  { x: 27.5, y: 7.4, z: 10, c: 0xffaa55 }, // wallace bedroom
+  { x: 40,   y: 2.5, z: 38, c: 0xffaa55 }, // courtyard
+];
+for (const s of candleSpots) {
+  const l = new THREE.PointLight(s.c, 0.8, 7, 1.8);
+  l.position.set(s.x, s.y, s.z);
+  scene.add(l);
+  candleLights.push(l);
+}
+function tickCandles(dt: number) {
+  for (const l of candleLights) {
+    // Stochastic flicker: small random walk around baseline 0.8.
+    const noise = (Math.random() - 0.5) * 0.4;
+    l.intensity = Math.max(0.35, Math.min(1.1, l.intensity + noise * dt * 4));
+  }
+}
+function tickDawnDim() {
+  // Sky brightens gradually after the dawn flag fires.
+  if (consequences.has('dawn_reached')) {
+    ambientLight.intensity = Math.min(1.5, ambientLight.intensity + 0.0005);
+    hemiLight.intensity = Math.min(1.2, hemiLight.intensity + 0.0004);
+  }
+}
 
 // === World + Physics + Mansion ===
 const world = new VoxelWorld(MAP_W, MAP_H, MAP_D);
@@ -521,6 +554,7 @@ gameClock.onTick = (e) => {
     renderObjectiveCard();
     dispatchOffscreenBeat('assassin_arrived');
     playSfx('door_burst');
+    setAmbient('combat');
     gameActor.send({ type: 'ASSASSIN_ARRIVED' });
     autoSave('assassin_arrived');
   }
@@ -551,6 +585,14 @@ function detectRoomEntry() {
   if (nearest && nearest !== lastLandmarkId && nearestDist < 50) {
     lastLandmarkId = nearest;
     gameClock.advance('enter_room');
+    // Iter 46: swap ambient by room family. Best-effort fuzzy match on landmark id.
+    if (inCatacombs) setAmbient('catacombs');
+    else if (gameClock.state.inCombat) setAmbient('combat');
+    else if (/study|library|bedroom/i.test(nearest)) setAmbient('study');
+    else if (/kitchen|cook|dining/i.test(nearest)) setAmbient('kitchen');
+    else if (/courtyard|garden|outside|herb/i.test(nearest)) setAmbient('courtyard');
+    else if (/cellar|storage|basement/i.test(nearest)) setAmbient('cellar');
+    else setAmbient('study');
   }
 }
 
@@ -1459,6 +1501,7 @@ function enterCatacombs() {
   gameActor.send({ type: 'CATACOMBS_ENTER' });
   autoSave('catacombs_enter');
   playSfx('rumble');
+  setAmbient('catacombs');
   logCombat('You descend through the trapdoor into damp stone.');
   // Only NPCs near the storage-room trapdoor "see" the descent.
   const trapdoorPos = { x: 44, y: 1.05, z: 27 };
@@ -1984,6 +2027,8 @@ function animate() {
   tickCatacombsEnemies(dt);
   tickRumorDiffusion(dt);
   tickNpcTalk(dt);
+  tickCandles(dt);
+  tickDawnDim();
   if (mp) {
     const p = player.getPosition();
     mp.pushSelfPos(p.x, p.y, p.z, player.yaw.rotation.y, character.name);

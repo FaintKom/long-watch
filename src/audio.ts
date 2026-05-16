@@ -28,6 +28,14 @@ let noiseSynth: Tone.NoiseSynth | null = null;
 let pluckSynth: Tone.PluckSynth | null = null;
 let pmSynth: Tone.PolySynth | null = null;
 
+// --- Ambient loops (Iter 46) ---
+let ambientNoise: Tone.Noise | null = null;
+let ambientFilter: Tone.Filter | null = null;
+let ambientGain: Tone.Gain | null = null;
+let currentAmbient: AmbientName | 'off' = 'off';
+
+export type AmbientName = 'study' | 'kitchen' | 'courtyard' | 'cellar' | 'combat' | 'catacombs' | 'off';
+
 export async function unlockAudio(): Promise<void> {
   if (unlocked) return;
   try {
@@ -42,6 +50,38 @@ export async function unlockAudio(): Promise<void> {
   noiseSynth = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.005, decay: 0.15, sustain: 0 } }).connect(limiter);
   pluckSynth = new Tone.PluckSynth({ attackNoise: 0.5, dampening: 4000, resonance: 0.7 }).connect(limiter);
   pmSynth = new Tone.PolySynth(Tone.FMSynth).connect(limiter);
+
+  // Ambient chain: continuous Tone.Noise -> filter -> gain. Filter cutoff and
+  // gain are swapped per location to produce wind/fire/sea/echo flavours.
+  ambientGain = new Tone.Gain(0).connect(limiter);
+  ambientFilter = new Tone.Filter({ frequency: 600, type: 'lowpass', rolloff: -12 }).connect(ambientGain);
+  ambientNoise = new Tone.Noise({ type: 'brown' }).connect(ambientFilter);
+  ambientNoise.start();
+}
+
+/**
+ * Swap the ambient loop to a per-location preset. Smoothly ramps gain.
+ * Called from main.ts when player crosses rooms or phase changes.
+ */
+export function setAmbient(name: AmbientName): void {
+  if (!unlocked || !ambientFilter || !ambientGain || !ambientNoise) return;
+  if (currentAmbient === name) return;
+  currentAmbient = name;
+  const now = Tone.now();
+  // Presets: filter cutoff, noise type, gain level.
+  const presets: Record<AmbientName, { freq: number; type: 'pink' | 'brown' | 'white'; gain: number }> = {
+    off:        { freq: 800, type: 'brown',  gain: 0.0 },
+    study:      { freq: 320, type: 'brown',  gain: 0.04 },  // low-pass hush
+    kitchen:    { freq: 1200, type: 'pink',  gain: 0.05 },  // fire crackle hint
+    courtyard:  { freq: 2200, type: 'pink',  gain: 0.07 },  // wind
+    cellar:     { freq: 220, type: 'brown',  gain: 0.06 },  // deep echo
+    combat:     { freq: 1600, type: 'pink',  gain: 0.10 },  // tension noise
+    catacombs:  { freq: 180, type: 'brown',  gain: 0.09 },  // sub-rumble
+  };
+  const p = presets[name];
+  ambientFilter.frequency.linearRampTo(p.freq, 1.2, now);
+  ambientNoise.type = p.type;
+  ambientGain.gain.linearRampTo(p.gain, 1.2, now);
 }
 
 export type SfxName =
