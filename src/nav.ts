@@ -107,7 +107,14 @@ export class Navigator {
     if (mx === tx && mz === tz) return { dx: 0, dz: 0 };
 
     const now = performance.now();
-    const targetMoved = !this.cache || this.cache.targetX !== tx || this.cache.targetZ !== tz;
+    // Iter 71 perf: don't replan on every tile change of a moving target.
+    // 3-tile threshold turns a 60Hz A* storm into ~1-2 plans per second per NPC.
+    let targetMoved = !this.cache;
+    if (this.cache) {
+      const dx = this.cache.targetX - tx;
+      const dz = this.cache.targetZ - tz;
+      targetMoved = Math.abs(dx) + Math.abs(dz) >= 3;
+    }
     const stale = !this.cache || (now - this.cache.computedAt) > this.replanIntervalMs;
     const drifted = this.cache ? this.distanceToPath(mx, mz) > this.driftTiles : true;
 

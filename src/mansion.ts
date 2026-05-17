@@ -204,19 +204,26 @@ export function buildMansion(world: VoxelWorld, physics: PhysicsWorld, scene: TH
   ];
 
   // === BUILD PHYSICS COLLIDERS ===
-  // Iter 70 perf: per-voxel static bodies created an 8-10k-body Cannon-es
-  // world that OOM'd at boot. Skip voxels at y >= 9 (roof + above-head
-  // ceiling the player can't reach). Saves ~1250+ colliders.
+  // Iter 71 perf: greedy row-merging cuts collider count ~80%. Scans each Y
+  // level; consecutive solid voxels on a Z row become one wider box. Was
+  // 5-10k per-voxel bodies (cannon-es SAP broadphase choked at 1-2 fps).
+  // Also still skips y >= 9 (roof) - player can't reach.
   for (let y = 0; y < Math.min(MAP_H, 9); y++) {
     for (let z = 0; z < MAP_D; z++) {
-      for (let x = 0; x < MAP_W; x++) {
-        if (!world.isSolid(x, y, z)) continue;
-        const exposed =
+      let runStart = -1;
+      for (let x = 0; x <= MAP_W; x++) {
+        const solidExposed = x < MAP_W && world.isSolid(x, y, z) && (
           !world.isSolid(x - 1, y, z) || !world.isSolid(x + 1, y, z) ||
           !world.isSolid(x, y - 1, z) || !world.isSolid(x, y + 1, z) ||
-          !world.isSolid(x, y, z - 1) || !world.isSolid(x, y, z + 1);
-        if (!exposed) continue;
-        physics.addStaticBox(x + 0.5, y + 0.5, z + 0.5, 1, 1, 1);
+          !world.isSolid(x, y, z - 1) || !world.isSolid(x, y, z + 1)
+        );
+        if (solidExposed) {
+          if (runStart < 0) runStart = x;
+        } else if (runStart >= 0) {
+          const runLen = x - runStart;
+          physics.addStaticBox(runStart + runLen / 2, y + 0.5, z + 0.5, runLen, 1, 1);
+          runStart = -1;
+        }
       }
     }
   }

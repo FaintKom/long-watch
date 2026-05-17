@@ -2178,6 +2178,7 @@ if (typeof document !== 'undefined') {
 }
 
 let animateErrorCount = 0;
+let castAiFrameCounter = 0;
 // Iter 65: optional perf overlay. Toggle with P.
 let perfOverlayOn = false;
 let perfSampleAt = 0;
@@ -2240,8 +2241,12 @@ function animateInner() {
     mp.pushSelfPos(p.x, p.y, p.z, player.yaw.rotation.y, character.name);
   }
 
-  // === Cast AI ===
-  tickCastAi(dt);
+  // === Cast AI === Iter 71 perf: throttle to ~15Hz (every 4 frames at 60fps).
+  castAiFrameCounter++;
+  if (castAiFrameCounter >= 4) {
+    tickCastAi(dt * castAiFrameCounter);
+    castAiFrameCounter = 0;
+  }
 
   // === Companions ===
   if (started && !endingShown) {
