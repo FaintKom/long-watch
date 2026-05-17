@@ -69,15 +69,12 @@ scene.add(ambientLight);
 const hemiLight = new THREE.HemisphereLight(0x668899, 0x332211, 0.4);
 scene.add(hemiLight);
 
-// --- Iter 46: candle flicker + dawn dim/bright cycle ---
+// --- Iter 46: candle flicker (Iter 70: down to 3 stationary lights). ---
 const candleLights: THREE.PointLight[] = [];
 const candleSpots = [
   { x: 17.5, y: 2.5, z: 8,  c: 0xffaa55 }, // entry hall
-  { x: 6,    y: 2.5, z: 8,  c: 0xffaa55 }, // study
-  { x: 42,   y: 2.5, z: 7,  c: 0xffaa55 }, // kitchen
   { x: 30,   y: 7.4, z: 22, c: 0xffaa55 }, // library
-  { x: 27.5, y: 7.4, z: 10, c: 0xffaa55 }, // wallace bedroom
-  { x: 40,   y: 2.5, z: 38, c: 0xffaa55 }, // courtyard
+  { x: 42,   y: 2.5, z: 7,  c: 0xffaa55 }, // kitchen
 ];
 for (const s of candleSpots) {
   const l = new THREE.PointLight(s.c, 0.8, 7, 1.8);
@@ -168,7 +165,11 @@ const clueProps: CluePropInstance[] = buildClueProps(scene);
 
 // === Mansion props ===
 const props: PropInstance[] = placeMansionProps(scene, physics);
-placeMansionDecor(scene);
+// Iter 70: decor pass gated behind ?decor=1 default OFF. 96 books +
+// chandelier candles + rugs were prime OOM suspect on integrated GPUs.
+if (new URL(window.location.href).searchParams.get('decor') === '1') {
+  placeMansionDecor(scene);
+}
 const worldState: PlayerWorldState = newPlayerWorldState();
 const inventory = new Inventory();
 const reputation = newReputation();
@@ -864,8 +865,11 @@ function castSpellByIndex(idx: number) {
 
 renderer.domElement.addEventListener('click', () => {
   if (started && !document.pointerLockElement) renderer.domElement.requestPointerLock();
-  void unlockAudio();
-  void startMusic();
+  // Iter 70: audio + music gated behind URL flags. Default OFF after OOM
+  // reports. Opt in with ?audio=1 (SFX + ambient) or ?music=1 (Tone synths).
+  const params = new URL(window.location.href).searchParams;
+  if (params.get('audio') === '1') void unlockAudio();
+  if (params.get('music') === '1') void startMusic();
 });
 
 window.addEventListener('resize', () => {

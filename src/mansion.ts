@@ -204,7 +204,10 @@ export function buildMansion(world: VoxelWorld, physics: PhysicsWorld, scene: TH
   ];
 
   // === BUILD PHYSICS COLLIDERS ===
-  for (let y = 0; y < MAP_H; y++) {
+  // Iter 70 perf: per-voxel static bodies created an 8-10k-body Cannon-es
+  // world that OOM'd at boot. Skip voxels at y >= 9 (roof + above-head
+  // ceiling the player can't reach). Saves ~1250+ colliders.
+  for (let y = 0; y < Math.min(MAP_H, 9); y++) {
     for (let z = 0; z < MAP_D; z++) {
       for (let x = 0; x < MAP_W; x++) {
         if (!world.isSolid(x, y, z)) continue;
@@ -219,16 +222,21 @@ export function buildMansion(world: VoxelWorld, physics: PhysicsWorld, scene: TH
   }
 
   // === LAMPS ===
-  for (const lamp of lamps) {
-    const light = new THREE.PointLight(lamp.color, lamp.intensity, 16, 1.4);
-    light.position.set(lamp.x + 0.5, lamp.y, lamp.z + 0.5);
-    light.castShadow = false;
-    scene.add(light);
+  // Iter 70 perf: only first 4 lamps spawn a PointLight; rest become emissive
+  // glow spheres so the player still sees the lamp object in the dark.
+  for (let li = 0; li < lamps.length; li++) {
+    const lamp = lamps[li];
+    if (li < 4) {
+      const light = new THREE.PointLight(lamp.color, lamp.intensity, 16, 1.4);
+      light.position.set(lamp.x + 0.5, lamp.y, lamp.z + 0.5);
+      light.castShadow = false;
+      scene.add(light);
+    }
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(0.1, 6, 6),
       new THREE.MeshBasicMaterial({ color: lamp.color }),
     );
-    glow.position.copy(light.position);
+    glow.position.set(lamp.x + 0.5, lamp.y, lamp.z + 0.5);
     scene.add(glow);
   }
 
