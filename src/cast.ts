@@ -517,10 +517,15 @@ export class CastMember {
     const me = this.body.position;
 
     if (this.aiState === 'idle' || this.aiState === 'alarmed') {
-      // Stationary for now. Look toward player when nearby.
+      // Iter 72 fix: only turn toward player when within 4m. Was auto-rotate
+      // at any distance, which made the cone-of-vision check in witnessCheck
+      // catch theft attempts from anywhere within 12m.
       const dx = playerPos.x - me.x;
       const dz = playerPos.z - me.z;
-      this.group.rotation.y = Math.atan2(dx, dz);
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 4) {
+        this.group.rotation.y = Math.atan2(dx, dz);
+      }
       this.body.velocity.x = 0; this.body.velocity.z = 0;
       return;
     }
