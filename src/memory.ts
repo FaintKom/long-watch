@@ -61,10 +61,10 @@ export class Memory {
   private nextReflectionId = 1;
   /** Trigger threshold - fire a reflection after this many new events. */
   reflectionThreshold = 8;
-  /** Max reflections kept per NPC (oldest dropped). */
-  maxReflectionsPerNpc = 20;
-  /** Threshold to fire a consolidation pass (collapse oldest N into 1 summary). */
-  consolidateThreshold = 15;
+  /** Iter 66 perf: max reflections kept per NPC reduced 20 -> 10. */
+  maxReflectionsPerNpc = 10;
+  /** Iter 66 perf: consolidation fires earlier (15 -> 8). */
+  consolidateThreshold = 8;
   /** How many oldest reflections to merge per consolidate run. */
   consolidateBatchSize = 10;
   private reflecting: Set<CastId> = new Set();

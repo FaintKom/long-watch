@@ -36,6 +36,16 @@
       font-size: 13px; line-height: 1.6;
     }
 
+    #perf-overlay {
+      position: absolute; left: 16px; bottom: 16px;
+      background: rgba(0,0,0,0.6); color: #6f8;
+      padding: 4px 8px; font: 11px monospace;
+      border: 1px solid #553; border-radius: 4px;
+      pointer-events: none;
+      display: none;
+    }
+    #perf-overlay.active { display: block; }
+
     #objective-card {
       position: absolute; top: 12px; right: 12px;
       max-width: 280px;
@@ -367,6 +377,7 @@
 
   <div id="hud">
     <div id="crosshair"></div>
+    <div id="perf-overlay" aria-hidden="true"></div>
     <div id="clock">9:00 PM</div>
     <div id="stats-panel"></div>
     <div id="objective-card"></div>

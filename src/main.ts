@@ -1127,6 +1127,12 @@ window.addEventListener('keydown', (e) => {
     toggleCluePanel();
     return;
   }
+  if (e.code === 'KeyP') {
+    perfOverlayOn = !perfOverlayOn;
+    const el = document.getElementById('perf-overlay');
+    if (el) el.classList.toggle('active', perfOverlayOn);
+    return;
+  }
   if (e.code === 'KeyY' && mp) {
     // Toggle party chat input. Use Y so it doesn't clash with T (shop).
     const inp = document.getElementById('mp-chat-input') as HTMLInputElement | null;
@@ -1600,6 +1606,8 @@ function enterCatacombs() {
   playSfx('rumble');
   setAmbient('catacombs');
   setMusicPhase('catacombs');
+  // Iter 65 perf: explicitly mark mansion hidden so catacombs becomes visible
+  // (catacombs root is opt-in: it's only added to scene inside buildCatacombs).
   logCombat('You descend through the trapdoor into damp stone.');
   // Only NPCs near the storage-room trapdoor "see" the descent.
   const trapdoorPos = { x: 44, y: 1.05, z: 27 };
@@ -2152,19 +2160,52 @@ import * as __names from './names';
 (window as any).__names = __names;
 
 let prevTime = performance.now();
+// Iter 67 perf: pause animate + music when tab hidden so background tabs
+// don't burn CPU/GPU/AudioContext cycles. Browser already throttles RAF when
+// hidden, but we additionally short-circuit animateInner to keep dt clean
+// when the tab comes back.
+let tabHidden = false;
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    tabHidden = document.hidden;
+    // Reset prevTime when waking up so dt doesn't spike from accumulated wall-clock.
+    if (!tabHidden) prevTime = performance.now();
+  });
+}
+
 let animateErrorCount = 0;
+// Iter 65: optional perf overlay. Toggle with P.
+let perfOverlayOn = false;
+let perfSampleAt = 0;
+let perfFrames = 0;
 function animate() {
   requestAnimationFrame(animate);
+  if (tabHidden) return; // skip work entirely
   try {
     animateInner();
+    if (perfOverlayOn) updatePerfOverlay();
   } catch (err) {
     animateErrorCount++;
     if (animateErrorCount <= 3) {
       console.error('[animate] error', err);
       logCombat('Internal error (logged). Continuing.');
     }
-    // After 3 errors, suppress logs to avoid log spam, but keep rendering.
   }
+}
+
+function updatePerfOverlay(): void {
+  perfFrames++;
+  const now = performance.now();
+  if (now - perfSampleAt < 500) return;
+  const fps = (perfFrames * 1000) / (now - perfSampleAt);
+  perfFrames = 0;
+  perfSampleAt = now;
+  const info = renderer.info;
+  const el = document.getElementById('perf-overlay');
+  if (!el) return;
+  const mem = (performance as { memory?: { usedJSHeapSize: number } }).memory;
+  const heap = mem ? `${Math.round(mem.usedJSHeapSize / 1048576)}MB` : 'n/a';
+  el.textContent = `${fps.toFixed(0)}fps | calls:${info.render.calls} tris:${info.render.triangles} geom:${info.memory.geometries} tex:${info.memory.textures} | heap:${heap}`;
 }
 
 function animateInner() {

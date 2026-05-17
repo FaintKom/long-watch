@@ -489,7 +489,8 @@ export class CastMember {
 
   pushHistory(role: 'user' | 'assistant', content: string) {
     this.history.push({ role, content });
-    if (this.history.length > 10) this.history.shift();
+    // Iter 66 perf: cap history 10 -> 6 (older turns retrievable via memory.feed).
+    if (this.history.length > 6) this.history.shift();
   }
 
   syncMesh() {
@@ -579,6 +580,19 @@ export class CastMember {
         this.body.velocity.x = 0; this.body.velocity.z = 0;
       }
     }
+  }
+
+  /** Iter 68 perf: dispose owned geometry + material when the NPC is removed. */
+  destroy(scene: THREE.Scene, physics: PhysicsWorld): void {
+    scene.remove(this.group);
+    try { physics.removeBody(this.body); } catch { /* already removed */ }
+    this.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose?.();
+        if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+        else obj.material?.dispose?.();
+      }
+    });
   }
 
   takeHit(damage: number, byPlayer: boolean): { died: boolean; firstHitByPlayer: boolean } {

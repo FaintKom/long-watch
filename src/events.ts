@@ -16,7 +16,8 @@ export interface WorldEvent {
 export class WorldFeed {
   events: WorldEvent[] = [];
   private nextId = 1;
-  maxKept = 60;
+  /** Iter 66 perf: tightened from 60 to 30 - rolling window for retrieval. */
+  maxKept = 30;
 
   add(text: string, inGameMinute: number, visibility: 'public' | CastId[] = 'public'): WorldEvent {
     const e: WorldEvent = { id: this.nextId++, inGameMinute, text, visibility };
