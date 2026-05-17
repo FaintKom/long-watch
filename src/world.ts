@@ -146,8 +146,11 @@ export class VoxelWorld {
       for (let i = 0; i < matrices.length; i++) {
         instanced.setMatrixAt(i, matrices[i]);
       }
-      instanced.castShadow = !isGlass && !isWater;
-      instanced.receiveShadow = true;
+      // Iter 69 perf: voxel walls neither cast nor receive shadows. With
+      // thousands of instances on PCFShadowMap, shadow pass ate GPU memory
+      // until crash. Static voxel art looks fine flat-lit.
+      instanced.castShadow = false;
+      instanced.receiveShadow = false;
       this.group.add(instanced);
       this.meshes.push(instanced);
     }

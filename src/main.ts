@@ -49,10 +49,10 @@ const objEl = document.getElementById('objective-card');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-// Iter 64 perf: PCFShadowMap is ~30% cheaper than PCFSoftShadowMap and the
-// game's voxel aesthetic doesn't need silky soft shadow edges.
-renderer.shadowMap.type = THREE.PCFShadowMap;
+// Iter 69 perf: shadows OFF by default. With ~12 PointLights + thousands of
+// voxel instances, shadow map allocation OOM'd at scene init. Re-enable per
+// instance if a hero light truly needs it.
+renderer.shadowMap.enabled = false;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.25;
 document.body.appendChild(renderer.domElement);
