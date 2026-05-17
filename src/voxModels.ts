@@ -35,27 +35,48 @@ export interface VoxUpgradeOpts {
   rotationY?: number;
 }
 
+/**
+ * Iter 63: temporarily disable vox upgrade. Our procedural .vox files (Iter 34
+ * + v2/v3) omit nTRN/nGRP/nSHP scene-graph chunks; threejs-vox-loader v2.0.0
+ * requires them and throws "_type" undefined inside its scene builder.
+ *
+ * Two real fixes pending:
+ *  - regenerate .vox with full scene graph chunks in tools/gen-vox.mjs, OR
+ *  - swap to MagicaVoxel-modeled or AI-generated (gen-vox-ai.mjs) .vox files
+ *    that already include the scene graph.
+ *
+ * Until then we resolve null so box fallback meshes show.
+ */
+const VOX_LOADING_DISABLED = true;
+
 function loadOnce(key: string): Promise<THREE.Group | null> {
+  if (VOX_LOADING_DISABLED) return Promise.resolve(null);
   if (_cache.has(key)) return _cache.get(key)!;
   if (_knownMissing.has(key)) return Promise.resolve(null);
   const url = `/models/${key}.vox`;
   const p = new Promise<THREE.Group | null>((resolve) => {
-    _loader.load(
-      url,
-      (voxScene: any) => {
-        try {
-          if (typeof voxScene.center === 'function') voxScene.center();
-          resolve(voxScene as THREE.Group);
-        } catch {
+    try {
+      _loader.load(
+        url,
+        (voxScene: any) => {
+          try {
+            if (typeof voxScene.center === 'function') voxScene.center();
+            resolve(voxScene as THREE.Group);
+          } catch {
+            _knownMissing.add(key);
+            resolve(null);
+          }
+        },
+        undefined,
+        (_err: unknown) => {
+          _knownMissing.add(key);
           resolve(null);
-        }
-      },
-      undefined,
-      (_err: unknown) => {
-        _knownMissing.add(key);
-        resolve(null);
-      },
-    );
+        },
+      );
+    } catch {
+      _knownMissing.add(key);
+      resolve(null);
+    }
   });
   _cache.set(key, p);
   return p;

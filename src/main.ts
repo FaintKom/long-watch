@@ -494,6 +494,10 @@ const partyObjectives = rollObjectivesForParty(['p1', 'p2', 'p3', 'p4']);
 const myObjective = partyObjectives[0];
 const summary = summarizeForPlayer(plot, myObjective.objective);
 
+// Iter 51 multiplayer handle. Declared null here so renderObjectiveCard (which
+// runs before the mp wiring block below) can read it without TDZ.
+let mp: Multiplayer | null = null;
+
 function renderObjectiveCard() {
   if (!objEl) return;
   const obj = summary.myObjective;
@@ -545,7 +549,7 @@ const memory = new Memory();
 const consequences = new ConsequenceStore();
 const gameActor = startGameActor((snap) => console.log('[gameState]', snap.value));
 // Opt-in P2P via ?room=NAME URL param. Null when single-player.
-const mp: Multiplayer | null = maybeJoinRoom(scene);
+mp = maybeJoinRoom(scene);
 if (mp) {
   // Wire chat input submit.
   const chatInp = document.getElementById('mp-chat-input') as HTMLInputElement | null;
