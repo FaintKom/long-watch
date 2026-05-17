@@ -134,9 +134,8 @@ export class Enemy {
     eyeR.position.x = 0.1 * scale;
     this.group.add(eyeR);
 
-    const eyeLight = new THREE.PointLight(preset.eyeColor, 0.5, 4);
-    eyeLight.position.set(0, 0.6 * scale, 0.3 * scale);
-    this.group.add(eyeLight);
+    // Iter 64 perf: drop per-enemy PointLight - emissive eye spheres pop in
+    // the dark without dragging shader cost.
 
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.45 * scale, 0.5 * scale, 16),

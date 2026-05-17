@@ -14,6 +14,8 @@ interface Burst {
 }
 
 const active: Burst[] = [];
+/** Iter 64 perf: hard cap so rapid LMB triggers don't pile up GPU allocations. */
+const MAX_ACTIVE_BURSTS = 8;
 let _scene: THREE.Scene | null = null;
 export function bindParticleScene(scene: THREE.Scene): void { _scene = scene; }
 
@@ -30,6 +32,7 @@ export interface BurstOpts {
 
 export function spawnBurst(opts: BurstOpts): void {
   if (!_scene) return;
+  if (active.length >= MAX_ACTIVE_BURSTS) return; // overflow drop
   const count = opts.count ?? 24;
   const size = opts.size ?? 0.06;
   const spread = opts.spread ?? 0.6;

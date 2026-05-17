@@ -97,12 +97,13 @@ export function buildCatacombs(scene: THREE.Scene, physics: PhysicsWorld, opts: 
   // --- Lights ---
   const ambient = new THREE.AmbientLight(0x223344, 0.4);
   root.add(ambient);
-  // Sparse torches along open tiles.
+  // Iter 64 perf: torch density halved (every 36 open tiles instead of 18)
+  // to keep total PointLight count under WebGL shader threshold.
   let torchN = 0;
   for (let z = 1; z < grid.height; z++) {
     for (let x = 1; x < grid.width; x++) {
       if (!grid.isFloor(x, z)) continue;
-      if ((torchN++) % 18 !== 0) continue;
+      if ((torchN++) % 36 !== 0) continue;
       const t = new THREE.PointLight(0xffaa66, 1.4, 8, 1.5);
       t.position.set(x * CELL, WALL_HEIGHT - 0.4, z * CELL);
       root.add(t);
@@ -137,9 +138,7 @@ export function buildCatacombs(scene: THREE.Scene, physics: PhysicsWorld, opts: 
     m.position.set(p.x, 0.15, p.z);
     m.castShadow = true;
     root.add(m);
-    const glint = new THREE.PointLight(0xffcc66, 0.6, 3, 2);
-    glint.position.set(p.x, 0.6, p.z);
-    root.add(glint);
+    // Iter 64 perf: dropped glint PointLight (emissive material in lootCacheMat is enough).
     lootSpots.push(new THREE.Vector3(p.x, 0.6 + Y_OFFSET, p.z));
   }
 

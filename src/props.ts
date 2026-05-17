@@ -311,6 +311,8 @@ function buildChandelier(): THREE.Group {
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.025, 8, 16), metalMat(0xaa7733));
   ring.rotation.x = Math.PI / 2;
   g.add(ring);
+  // 6 candle bodies for visual richness, but only ONE shared PointLight to keep
+  // per-frame shader cost low (Iter 64 perf pass).
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
     const cx = Math.cos(a) * 0.3;
@@ -318,10 +320,10 @@ function buildChandelier(): THREE.Group {
     const cand = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.18, 6), clothMat(0xeeddaa));
     cand.position.set(cx, 0.09, cz);
     g.add(cand);
-    const flame = new THREE.PointLight(0xffaa55, 0.3, 4, 2);
-    flame.position.set(cx, 0.22, cz);
-    g.add(flame);
   }
+  const flame = new THREE.PointLight(0xffaa55, 1.2, 6, 1.8);
+  flame.position.set(0, 0.2, 0);
+  g.add(flame);
   return g;
 }
 

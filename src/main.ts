@@ -50,7 +50,9 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Iter 64 perf: PCFShadowMap is ~30% cheaper than PCFSoftShadowMap and the
+// game's voxel aesthetic doesn't need silky soft shadow edges.
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.25;
 document.body.appendChild(renderer.domElement);
@@ -592,6 +594,9 @@ const worldFeed: WorldFeed = memory.feed;
 /** Log to UI combat log AND chronicle to long-term memory (public visibility). For targeted events use memory.addEvent with a CastId[] visibility. */
 function logCombat(line: string) {
   combatLog.push(line);
+  // Iter 64 perf: cap combat log growth so the array doesn't balloon over a
+  // full night (~1200 in-game minutes can produce hundreds of entries).
+  if (combatLog.length > 300) combatLog.splice(0, combatLog.length - 300);
   console.log('[Long Watch]', line);
   const el = document.getElementById('combat-log');
   if (el) el.innerHTML = combatLog.slice(-8).map(l => `<div>${l}</div>`).join('');
